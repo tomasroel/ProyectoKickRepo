@@ -773,3 +773,6 @@ matches_nadal_ok$H2HWR <-
 save(matches_nadal_ok,
      file = "matches_nadal_ok.Rdata")
 warnings()
+
+matches_nadal_ok %>% 
+  write.csv("matches_nadal_ok.csv")
