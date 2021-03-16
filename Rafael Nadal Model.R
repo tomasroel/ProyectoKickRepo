@@ -7,7 +7,7 @@ pacman::p_load(pacman, tidyverse, lubridate,
 
 options(scipen = 999) #desactivo notación cientifica
 
-# IMPORTAR DATOS DESDE DISCO LOCAL ####
+# IMPORTAR DATOS DESDE DISCO GITHUB ####
 
 coltypes = c("numeric", "text", "text", "date", "text", "text",
              "text", "text", "numeric", "text", "text",
@@ -770,5 +770,6 @@ matches_nadal_ok$H2HWR <-
 
 # EXPORTO DATASET FINAL ####
 
-matches_nadal_ok %>%
-  write_csv("matches_nadal_ok.csv")
+save(matches_nadal_ok,
+     file = "matches_nadal_ok.Rdata")
+warnings()
