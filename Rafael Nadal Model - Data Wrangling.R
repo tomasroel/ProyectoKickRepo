@@ -771,8 +771,8 @@ matches_nadal_ok$H2HWR <-
 # EXPORTO DATASET FINAL ####
 
 save(matches_nadal_ok,
-     file = "matches_nadal_ok.Rdata")
+     file = "Output/matches_nadal_ok.Rdata")
 warnings()
 
 matches_nadal_ok %>% 
-  write.csv("matches_nadal_ok.csv")
+  write.csv("Output/matches_nadal_ok.csv")
