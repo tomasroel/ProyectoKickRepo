@@ -2,13 +2,14 @@
 
 # SETUP #############################################################
 
-pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate)
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
+               boot)
 
 options(scipen = 999)
 
 # DATA IMPORT #######################################################
 
-matches_nadal_ok <- import("matches_nadal_ok.Rdata") %>% 
+matches_nadal_ok <- import("Output/matches_nadal_ok.Rdata") %>% 
   as_tibble()
 
 glimpse(matches_nadal_ok)
@@ -74,27 +75,17 @@ df_matches %>%
 
 glimpse(df_matches)
 
-# SEPARO DATA TRAINING Y TEST ###################################
+# SEPARO DATA POST 2020 ###################################
+#Esta data la voy a usar como testeo final
 
-trainingSize <- 0.15
+df_matches %>% 
+  filter(Date >= "2020-01-01") #son 33 partidos
 
-muestra <- sample(1:nrow(df_matches),
-                  round(nrow(df_matches)*trainingSize,0),
-                  replace = FALSE)
-
-df_matches_test <- df_matches[muestra,]
-df_matches_training <- df_matches[-muestra,]
-
-#Otra opción es separar los partidos de 2020-21 para test
-
-# df_matches_training <- df_matches %>% 
-#   filter(Date < ymd("2020-01-01"))
-# 
-# df_matches_test <- df_matches %>% 
-#   filter(Date >= ymd("2020-01-01") &
-#            Date < ymd("2021-01-01"))
-
-
+df_matches_train <- df_matches %>% 
+  filter(Date < "2020-01-01")
+  
+df_matches_test <- df_matches %>% 
+  filter(Date >= "2020-01-01")
 
 # COMPUTO LAS TASAS DE CORTE ###################################
 
@@ -143,49 +134,205 @@ df_matches %>%
 # voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
 # O sea un modelo de + de 85% de acierto.
 
-# AJUSTO MODELOS LOGIT ##########################################
+#En clay 2019 en adelante
 
-glm.fit <- glm(Result ~ RankNadal + RankRival + Surface +
+df_matches %>% 
+  filter(Date > ymd("2018-12-31") & 
+           Surface == "Clay") %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #90% en clay
+
+
+# PRUEBA DE VARIABLES ##########################################
+
+#El primer approach es varios modelos logit para ver la capacidad
+#predictiva de las variables
+
+#Modelo 1 ======================================================
+glm.fit1 <- glm(Result ~ RankNadal + RankRival + Surface +
                  WRUlt3Meses + WRRivalUlt3Meses + H2HPartidos + 
                  H2HGanados,
-               data = df_matches_training,
+               data = df_matches_train,
                family = binomial)
 
-summary(glm.fit)
+summary(glm.fit1)
 
-glm.probs <- predict(glm.fit, df_matches_test,
-                     type = "response")
+#De acá se desprende que el WR es importante. Surface tambien. H2H no parece
+ 
+ 
+# glm.probs <- predict(glm.fit, df_matches_test,
+#                      type = "response")
+# 
+# contrasts(df_matches_training$Result)
+# 
+# glm.pred <- rep("Lose", 159)
+# glm.pred[glm.probs > 0.8] = "Win"
+# 
+# table(glm.pred, df_matches_test$Result)
 
-contrasts(df_matches_training$Result)
-
-glm.pred <- rep("Lose", 159)
-glm.pred[glm.probs > 0.8] = "Win"
-
-table(glm.pred, df_matches_test$Result)
-
-# Modelo 2 ==========================================================
+#Modelo 2 ==========================================================
 
 glm.fit2 <- glm(Result ~ RankNadal + RankRival + Surface +
                  WRUlt3Meses + WRRivalUlt3Meses + WRUltMes + 
                   WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
                   Round + BestOf,
-               data = df_matches_training,
+               data = df_matches_train,
                family = binomial)
 
 summary(glm.fit2)
 
+#WR es muy importante. Partidos jugados tambien. Round y Surface tambien.
+#Rank más o menos.
+
 glm.probs2 <- predict(glm.fit2, df_matches_test,
                      type = "response")
 
-contrasts(df_matches_training$Result)
+contrasts(df_matches_train$Result)
 
-glm.pred2 <- rep("Lose", 159)
+glm.pred2 <- rep("Lose", 33)
 glm.pred2[glm.probs2 > 0.55] = "Win"
 
 table(glm.pred2, df_matches_test$Result)
 
-(122+24)/159
-124/127
+# Modelo 3 ======================================================
 
+#Voy a dejar solo ultimos 3 y ultimos 6 meses
+
+glm.fit3 <- glm(Result ~ Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                  PartidosUlt3Meses + PartidosRivalUlt3Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  WRUlt6Meses + WRRivalUlt6Meses + PartidosUlt6Meses +
+                  PartidosRivalUlt6Meses + Round + BestOf,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit3)
+
+glm.probs3 <- predict(glm.fit3, df_matches_test,
+                      type = "response")
+
+glm.pred3 <- rep("Lose", 33)
+glm.pred3[glm.probs3 > 0.55] = "Win"
+
+table(glm.pred3, df_matches_test$Result)
+
+# Modelo 4 =====================================================
+# Ahora junto todas las variables que me dieron resultado
+
+glm.fit4 <- glm(Result ~  Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                  PartidosUlt3Meses + PartidosRivalUlt3Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + RankNadal + RankRival,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit4)
+
+# Modelo 5 =====================================================
+
+glm.fit5 <- glm(Result ~  Surface + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + RankNadal + RankRival,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit5)
+
+glm.probs5 <- predict(glm.fit5, df_matches_test,
+                      type = "response")
+
+glm.pred5 <- rep("Lose", 33)
+glm.pred5[glm.probs5 > 0.55] = "Win"
+
+table(glm.pred5, df_matches_test$Result) #Empeora
+
+# Modelo 6 ====================================================
+
+#Uso resultados del ult mes y de los ult 6 meses
+
+glm.fit6 <- glm(Result ~  Surface + WRUlt6Meses + WRRivalUlt6Meses +
+                  PartidosUlt6Meses + PartidosRivalUlt6Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + ResultUltPartido,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit6)
+
+glm.probs6 <- predict(glm.fit6, df_matches_test,
+                      type = "response")
+
+glm.pred6 <- rep("Lose", 33)
+glm.pred6[glm.probs6 > 0.55] = "Win"
+
+table(glm.pred6, df_matches_test$Result)
+
+#La info del ultimo partido no es muy relevante
+
+# Modelo 7 =====================================================
+
+#Pruebo solo con info ult mes y ult 6 mas extras
+
+glm.fit7 <- glm(Result ~  Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                  PartidosUlt3Meses + PartidosRivalUlt3Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + RankNadal + RankRival,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit7)
+
+glm.probs7 <- predict(glm.fit7, df_matches_test,
+                      type = "response")
+
+glm.pred7 <- rep("Lose", 33)
+glm.pred7[glm.probs7 > 0.55] = "Win"
+
+table(glm.pred7, df_matches_test$Result)
+
+#Las del modelo 7 seran las variables seleccionadas.
+#Ahora trabajo en la flexibilidad del modelo
+
+# MODEL FLEXIBILITY ###########################################
+
+#CV test error glm.fit7 =======================================
+
+set.seed(17)
+
+cv.error <- cv.glm(df_matches_train,
+                   glm.fit7,
+                   K = 10)
+
+cv.error$delta
+
+#CV test error comparison =====================================
+
+set.seed(24)
+cv.error <- rep(0, 7)
+
+for (i in 1:7) {
+  
+  cv.error[i] = 
+    cv.glm(df_matches_train,
+           get(
+             paste("glm.fit", i, sep = "")
+             ),
+           K = 10)$delta[1]
+  
+}
+
+
+cv.error %<>%
+  as_tibble() %>% 
+  mutate(Modelo = seq(1:7)) %>% 
+  rename(cv.error = value)
+
+cv.error %>% 
+  ggplot(aes(x = Modelo, y = cv.error)) +
+  geom_line() + 
+  geom_point() + 
+  theme_classic() + 
+  scale_x_continuous(n.breaks = 7)
 
 
