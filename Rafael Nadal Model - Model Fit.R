@@ -42,7 +42,7 @@ df_matches %>%
 
 #Elimino primeras 50 observaciones, a partir de ahi se nivela
 
-df_matches <- df_matches[51:1107,]
+df_matches <- df_matches[51:nrow(df_matches),]
 
 # ALGUNOS PLOTS INTERESANTES #####################################
 
@@ -79,7 +79,7 @@ glimpse(df_matches)
 #Esta data la voy a usar como testeo final
 
 df_matches %>% 
-  filter(Date >= "2020-01-01") #son 33 partidos
+  filter(Date >= "2020-01-01")
 
 df_matches_train <- df_matches %>% 
   filter(Date < "2020-01-01")
@@ -190,7 +190,7 @@ glm.probs2 <- predict(glm.fit2, df_matches_test,
 
 contrasts(df_matches_train$Result)
 
-glm.pred2 <- rep("Lose", 33)
+glm.pred2 <- rep("Lose", nrow(df_matches_test))
 glm.pred2[glm.probs2 > 0.55] = "Win"
 
 table(glm.pred2, df_matches_test$Result)
@@ -212,7 +212,7 @@ summary(glm.fit3)
 glm.probs3 <- predict(glm.fit3, df_matches_test,
                       type = "response")
 
-glm.pred3 <- rep("Lose", 33)
+glm.pred3 <- rep("Lose", nrow(df_matches_test))
 glm.pred3[glm.probs3 > 0.55] = "Win"
 
 table(glm.pred3, df_matches_test$Result)
@@ -242,7 +242,7 @@ summary(glm.fit5)
 glm.probs5 <- predict(glm.fit5, df_matches_test,
                       type = "response")
 
-glm.pred5 <- rep("Lose", 33)
+glm.pred5 <- rep("Lose", nrow(df_matches_test))
 glm.pred5[glm.probs5 > 0.55] = "Win"
 
 table(glm.pred5, df_matches_test$Result) #Empeora
@@ -263,7 +263,7 @@ summary(glm.fit6)
 glm.probs6 <- predict(glm.fit6, df_matches_test,
                       type = "response")
 
-glm.pred6 <- rep("Lose", 33)
+glm.pred6 <- rep("Lose", nrow(df_matches_test))
 glm.pred6[glm.probs6 > 0.55] = "Win"
 
 table(glm.pred6, df_matches_test$Result)
@@ -286,7 +286,7 @@ summary(glm.fit7)
 glm.probs7 <- predict(glm.fit7, df_matches_test,
                       type = "response")
 
-glm.pred7 <- rep("Lose", 33)
+glm.pred7 <- rep("Lose", nrow(df_matches_test))
 glm.pred7[glm.probs7 > 0.55] = "Win"
 
 table(glm.pred7, df_matches_test$Result)
@@ -336,3 +336,91 @@ cv.error %>%
   scale_x_continuous(n.breaks = 7)
 
 
+# Flexibility Model 3 ===========================================
+
+set.seed(17)
+
+cv.error.flex <- rep(0, 7)
+
+for (i in 1:7) {
+
+glm.fit3.flex<- glm(Result ~ Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                       PartidosUlt3Meses + PartidosRivalUlt3Meses + poly(WRUltMes, i) + 
+                       poly(WRRivalUltMes, i) + poly(PartidosUltMes, i) +
+                       poly(PartidosRivalUltMes, i) +
+                       WRUlt6Meses + WRRivalUlt6Meses + PartidosUlt6Meses +
+                       PartidosRivalUlt6Meses + Round + BestOf,
+                     data = df_matches_train,
+                     family = binomial)
+
+cv.error.flex[i] <- 
+  cv.glm(df_matches_train,
+         glm.fit3.flex,
+         K = 10)$delta[1]
+}
+
+cv.error.flex %<>%
+  as_tibble() %>% 
+  mutate(FlexPol = seq(1:7)) %>% 
+  rename(cv.error = value)
+
+cv.error.flex %>% 
+  ggplot(aes(x = FlexPol, y = cv.error)) + 
+  geom_line() + 
+  geom_point() + 
+  scale_x_continuous(n.breaks = 7)
+
+#No hay suficiente evidencia de que convenga flexibilizar
+
+glm.selected <- glm.fit3
+
+summary(glm.selected)
+
+glm.selected.probs <- predict(glm.selected, df_matches_test,
+                      type = "response")
+
+glm.selected.pred <- rep("Lose", nrow(df_matches_test))
+glm.selected.pred[glm.selected.probs > 0.55] = "Win"
+
+table(glm.selected.pred, df_matches_test$Result)
+
+# TABLA COMPARATIVA ###########################################
+
+table.ROC <- tibble(
+  TN = rep(0,19),
+  FN = rep(0,19),
+  FP = rep(0,19),
+  TP = rep(0,19)
+)
+
+for (i in 1:19) {
+  
+  glm.selected.pred <- rep("Lose", 33)
+  glm.selected.pred[glm.selected.probs > 0.05*i] = "Win"
+  
+  confusion.matrix <- 
+    table(glm.selected.pred, df_matches_test$Result)
+  
+  table.ROC[i,1] = confusion.matrix[1,1]
+  table.ROC[i,2] = confusion.matrix[1,2]
+  table.ROC[i,3] = confusion.matrix[2,1]
+  table.ROC[i,4] = confusion.matrix[2,2]
+  
+}
+
+table.ROC %<>% 
+  mutate(FalsePositiveRate = FP/(FP+TN), #qué porcentaje dije que ganó, y en realidad perdió
+         TruePositiveRate = TP/(TP+FN),
+         Sensitivity = TN/(TN+FP),
+         Specificity = TP/(TP+FN),
+         Accuracy = (TP + TN)/(FP + TN + TP + FN),
+         Threshold = seq(0.05,0.95, by = 0.05)
+  )
+
+
+write.csv(glm.selected.pred,
+          "Testeos/glm.pred.csv")
+
+table(glm.selected.pred, df_matches_test$Result)
+
+glm.selected.probs
