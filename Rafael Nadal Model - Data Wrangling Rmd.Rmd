@@ -11,7 +11,7 @@ Arrancamos con un setup del environment.
 
 ```{r setup}
 pacman::p_load(pacman, tidyverse, lubridate,
-               stringr, readxl, magrittr)
+               stringr, readxl, magrittr, rio)
 
 options(scipen = 999) #desactivo notación cientifica
 ```
