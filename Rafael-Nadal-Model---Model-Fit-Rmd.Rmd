@@ -1,20 +1,34 @@
-# RAFAEL NADAL MODEL - MODEL FIT ####################################
+---
+title: "Rafael Nadal Model - Model Fit"
+output: html_notebook
+---
 
-# SETUP #############################################################
+En el presente documento analizaremos los partidos de Nadal en busca de patrones que nos permitan predecir el resultado de su proximo partido.
+
+Arrancamos con un setup del environment.
+
+
+```{r setup}
+install.packages("keras")
+install.packages("neuralnet")
+
 
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
-               boot)
+               boot, caret)
 
 options(scipen = 999)
+```
 
-# DATA IMPORT #######################################################
+Importamos la data previamente trabajada y seleccionamos las variables a utilizar.
+
+```{r data_import}
 
 matches_nadal_ok <- import("Output/matches_nadal_ok.Rdata") %>% 
   as_tibble()
 
 glimpse(matches_nadal_ok)
 
-# SEPARO VARIABLES A UTILIZAR #######################################
+# SEPARO VARIABLES A UTILIZAR
 
 variables <- c("Location", "Series", "Court", "Surface", "Date",
                "Round", "BestOf", "RankNadal", "RankRival",
@@ -31,7 +45,14 @@ df_matches <- matches_nadal_ok %>%
 
 glimpse(df_matches)
 
-# ELIMINO LAS PRIMERAS OBSERVACIONES #############################
+
+```
+
+
+Como proximo paso, eliminamos las primeras 50 observaciones ya que contienen campos con informacion incompleta (partidos jugados en ult. 6 meses, partidos ganados, etc.)
+
+
+```{r data_wrangling}
 
 #Estas no me sirven porque no tengo registro de los partidos anteriores
 
@@ -44,7 +65,14 @@ df_matches %>%
 
 df_matches <- df_matches[51:nrow(df_matches),]
 
-# ALGUNOS PLOTS INTERESANTES #####################################
+```
+
+
+##Plots
+
+A continuacion se presentan algunos graficos interesantes que nos ayudaran a comprender el comportamiento de algunas variables.
+
+```{r plots}}
 
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
@@ -75,8 +103,16 @@ df_matches %>%
 
 glimpse(df_matches)
 
-# SEPARO DATA POST 2020 ###################################
-#Esta data la voy a usar como testeo final
+```
+
+
+##Model Train
+
+Como primer paso, separo data post 2020 para usar en el testeo final de los modelos.
+Ademas calculo las tasas de corte para las cuales el modelo supone una mejor estrategia a decir que siempre va a ganar Nadal.
+
+
+```{r tasas_corte}
 
 df_matches %>% 
   filter(Date >= "2020-01-01")
@@ -144,41 +180,64 @@ df_matches %>%
   prop.table() #90% en clay
 
 
-# PRUEBA DE VARIABLES ##########################################
+```
 
-#El primer approach es varios modelos logit para ver la capacidad
-#predictiva de las variables
+Necesito un modelo que acierte por encima del 80% de las veces.
 
-#Modelo 1 ======================================================
-glm.fit1 <- glm(Result ~ RankNadal + RankRival + Surface +
-                 WRUlt3Meses + WRRivalUlt3Meses + H2HPartidos + 
-                 H2HGanados,
+###Prueba de Variables
+
+Arranco probando una serie de modelos logit para ver cuales son las variables con mayor impacto en el resultado del partido.
+
+```{r prueba_variables}
+
+#Modelo 1
+
+glm.fit1 <- glm(Result ~ Court + Surface + Round + BestOf + RankNadal + RankRival + PartidosUlt6Meses +
+                PartidosUlt3Meses + PartidosUltMes +  WRUlt6Meses + WRUlt3Meses + WRUltMes + 
+                PartidosRivalUlt6Meses + PartidosRivalUlt3Meses + PartidosRivalUltMes +
+                WRRivalUlt6Meses + WRRivalUlt3Meses + WRRivalUltMes +
+                SetsGanadosUltPartido + SetsPerdidosUltPartido +
+                ResultUltPartido + RoundUltPartido + 
+                H2HPartidos + H2HGanados,
                data = df_matches_train,
-               family = binomial)
+               family = binomial(link = "logit"))
 
 summary(glm.fit1)
 
 #De acá se desprende que el WR es importante. Surface tambien. H2H no parece
  
- 
-# glm.probs <- predict(glm.fit, df_matches_test,
-#                      type = "response")
-# 
-# contrasts(df_matches_training$Result)
-# 
-# glm.pred <- rep("Lose", 159)
-# glm.pred[glm.probs > 0.8] = "Win"
-# 
-# table(glm.pred, df_matches_test$Result)
 
-#Modelo 2 ==========================================================
+```
+
+
+Luego de este primer analisis, las variables que vamos a retener son:
+
+- Surface (si bien tiene p valor bajo, puede deberse a correlacion con otra covariable)
+- BestOf
+- Round
+- Rank Nadal
+- Rank Rival
+- Partidos Ult 6 / 3 / mes
+- WR 6 / 3 / mes
+- Partidos Rival Ult 6 / 3 / mes
+- WR Rival 6 / 3 / mes
+- ResultUltPartido
+- H2HPartidos
+- H2H Ganados
+
+Estas variables van a ser combinadas de varias formas, buscando el mejor modelo.
+
+
+```{r modelos_logisticos}
+
+#Modelo 2 
 
 glm.fit2 <- glm(Result ~ RankNadal + RankRival + Surface +
-                 WRUlt3Meses + WRRivalUlt3Meses + WRUltMes + 
-                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
-                  Round + BestOf,
+                WRUlt3Meses + WRRivalUlt3Meses + WRUltMes + 
+                WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                Round + BestOf,
                data = df_matches_train,
-               family = binomial)
+               family = binomial(link = "logit"))
 
 summary(glm.fit2)
 
@@ -193,7 +252,7 @@ contrasts(df_matches_train$Result)
 glm.pred2 <- rep("Lose", nrow(df_matches_test))
 glm.pred2[glm.probs2 > 0.55] = "Win"
 
-table(glm.pred2, df_matches_test$Result)
+table(glm.pred2, Real = df_matches_test$Result)
 
 # Modelo 3 ======================================================
 
@@ -294,6 +353,17 @@ table(glm.pred7, df_matches_test$Result)
 #Las del modelo 7 seran las variables seleccionadas.
 #Ahora trabajo en la flexibilidad del modelo
 
+
+
+```
+
+###Errores por CV
+
+Calculo el error utilizando CV para cada uno de los modelos ajustados.
+
+
+```{r cv_error}
+
 # MODEL FLEXIBILITY ###########################################
 
 #CV test error glm.fit7 =======================================
@@ -335,8 +405,15 @@ cv.error %>%
   theme_classic() + 
   scale_x_continuous(n.breaks = 7)
 
+#El modelo 3 es el que tiene menor ECM calculado via CV.
 
-# Flexibility Model 3 ===========================================
+
+
+```
+
+Trabajo ahora sobre la flexibilidad en el modelo 3.
+
+```{r model3_flex}
 
 set.seed(17)
 
@@ -384,7 +461,13 @@ glm.selected.pred[glm.selected.probs > 0.55] = "Win"
 
 table(glm.selected.pred, df_matches_test$Result)
 
-# TABLA COMPARATIVA ###########################################
+```
+
+
+Ahora determino la tasa de corte optima para determinar la prediccion del resultado.
+
+
+```{r table_ROC}
 
 table.ROC <- tibble(
   TN = rep(0,19),
@@ -417,10 +500,13 @@ table.ROC %<>%
          Threshold = seq(0.05,0.95, by = 0.05)
   )
 
+table.ROC
 
-write.csv(glm.selected.pred,
-          "Testeos/glm.pred.csv")
+```
 
-table(glm.selected.pred, df_matches_test$Result)
 
-glm.selected.probs
+#Redes Neuronales
+
+Ahora, encararemos el mismo problema utilizando redes neuronales. La idea es encontrar un modelo que permita identificar de la forma mas precisa posible los partidos en los que Nadal tiene una alta chance de perder.
+
+

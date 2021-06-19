@@ -1,0 +1,137 @@
+---
+title: "Rafael Nadal Model - Perceptron Algorithm"
+output: html_notebook
+author: "Tomás Roel"
+---
+
+En este breve documento se implementará el algoritmo del perceptron para intentar predecir el resultado de un partido de tenis donde uno de los tenistas sea Rafael Nadal.
+
+El perceptron es uno de los algoritmos de machine learning mas antiguos. No revisaremos aca su trasfondo matematico sino que evaluaremos unicamente su capacidad de clasificacion en este problema.
+
+Comenzamos haciendo un setup del environment.
+
+##Setup
+
+
+```{r setup}
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate)
+
+
+options(scipen = 999)
+```
+
+Importamos la data previamente trabajada. La misma consiste de una base de más de 1000 partidos jugados por Rafael Nadal, con su correspondiente resultado (gana/pierde) y con una serie de metricas (covariables) que representan el contexto en el cual se jugo el partido.
+
+##Data Import
+
+Importo la base de datos con los partidos, selecciono las variables de interes y elimino observaciones que por cuestiones relacionadas al problema no me sirven.
+
+
+```{r data_import}
+matches_nadal_ok <- import("Output/matches_nadal_ok.Rdata") %>% 
+  as_tibble()
+
+glimpse(matches_nadal_ok)
+
+# SEPARO VARIABLES A UTILIZAR
+
+variables <- c("Location", "Series", "Court", "Surface", "Date",
+               "Round", "BestOf", "RankNadal", "RankRival",
+               "PartidosUlt6Meses", "PartidosUlt3Meses", "PartidosUltMes",
+               "WRUlt6Meses", "WRUlt3Meses", "WRUltMes",
+               "PartidosRivalUlt6Meses", "PartidosRivalUlt3Meses",
+               "PartidosRivalUltMes", "WRRivalUlt6Meses", "WRRivalUlt3Meses",
+               "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
+               "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
+               "Result")
+
+df_matches <- matches_nadal_ok %>% 
+  select(all_of(variables))
+
+glimpse(df_matches)
+
+df_matches %>%
+  select(Location, RankNadal,
+         PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
+ print(n = 70)
+
+#Elimino primeras 50 observaciones, a partir de ahi se nivela
+#No tengo historia previa a esas 50 observaciones
+
+df_matches <- df_matches[51:nrow(df_matches),]
+
+```
+
+
+##Tasas de Corte
+
+Antes de arrancar con el model train, defino cuales seria un ratio de buena clasificacion aceptable para mi problema.
+
+```{r tasas_corte}
+df_matches %>% 
+  filter(Date >= "2020-01-01")
+
+df_matches_train <- df_matches %>% 
+  filter(Date < "2020-01-01")
+  
+df_matches_test <- df_matches %>% 
+  filter(Date >= "2020-01-01")
+
+# COMPUTO LAS TASAS DE CORTE ###################################
+
+# Probabilidad histórica de victoria Nadal =====================
+
+df_matches %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() # La probabilidad histórica es 83,9%.
+
+#Si mi prediccion es que siemopre gana, acierto el 83% de las veces.
+
+# Probabilidad ultimos 2 años ==================================
+
+df_matches %>% 
+  filter(Date > ymd("2019-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #84,3% de las veces ganó
+
+#Probabilidad 2020 en adelante =================================
+
+df_matches %>% 
+  filter(Date > ymd("2020-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #81,8% de las veces ganó
+
+#Probabilidad post cuarentena ==================================
+
+df_matches %>% 
+  filter(Date > ymd("2020-08-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #78,26% de las veces ganó.
+
+#Probabilidad 2021 =============================================
+
+df_matches %>% 
+  filter(Date > ymd("2020-12-31")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #80% pero con pocos partidos jugados.
+
+# En definitiva, si yo digo que gana nadal siempre
+# voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
+# O sea un modelo de + de 90% de acierto.
+
+#En clay 2019 en adelante
+
+df_matches %>% 
+  filter(Date > ymd("2018-12-31") & 
+           Surface == "Clay") %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #90% en clay
+
+```
+

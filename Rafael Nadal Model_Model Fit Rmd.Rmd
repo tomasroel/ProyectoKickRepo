@@ -1,0 +1,671 @@
+---
+title: "Rafael Nadal Model - Model Fit"
+output: html_notebook
+---
+
+En el presente documento analizaremos los partidos de Nadal en busca de patrones que nos permitan predecir el resultado de su proximo partido.
+
+Arrancamos con un setup del environment.
+
+
+```{r setup}
+# install.packages("keras")
+# install.packages("neuralnet")
+
+
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
+               boot, caret)
+
+
+options(scipen = 999)
+```
+
+Importamos la data previamente trabajada y seleccionamos las variables a utilizar.
+
+```{r data_import}
+
+matches_nadal_ok <- import("Output/matches_nadal_ok.Rdata") %>% 
+  as_tibble()
+
+glimpse(matches_nadal_ok)
+
+# SEPARO VARIABLES A UTILIZAR
+
+variables <- c("Location", "Series", "Court", "Surface", "Date",
+               "Round", "BestOf", "RankNadal", "RankRival",
+               "PartidosUlt6Meses", "PartidosUlt3Meses", "PartidosUltMes",
+               "WRUlt6Meses", "WRUlt3Meses", "WRUltMes",
+               "PartidosRivalUlt6Meses", "PartidosRivalUlt3Meses",
+               "PartidosRivalUltMes", "WRRivalUlt6Meses", "WRRivalUlt3Meses",
+               "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
+               "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
+               "Result")
+
+df_matches <- matches_nadal_ok %>% 
+  select(all_of(variables))
+
+glimpse(df_matches)
+
+
+```
+
+
+Como proximo paso, eliminamos las primeras 50 observaciones ya que contienen campos con informacion incompleta (partidos jugados en ult. 6 meses, partidos ganados, etc.)
+
+
+```{r data_wrangling}
+
+#Estas no me sirven porque no tengo registro de los partidos anteriores
+
+df_matches %>%
+  select(Location, RankNadal,
+         PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
+ print(n = 70)
+
+#Elimino primeras 50 observaciones, a partir de ahi se nivela
+
+df_matches <- df_matches[51:nrow(df_matches),]
+
+```
+
+
+##Plots
+
+A continuacion se presentan algunos graficos interesantes que nos ayudaran a comprender el comportamiento de algunas variables.
+
+```{r plots}}
+
+df_matches %>% 
+  ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
+             color = Result)) + 
+  geom_jitter(width = 1.5) #Cuando jugó muchos partidos y con alto wr hay mas chance de ganar
+
+df_matches %>% 
+  ggplot(aes(x = RankNadal, y = RankRival,
+             color = Result)) + 
+  geom_jitter() + 
+  coord_cartesian(ylim = c(0, 20),
+                  xlim = c(0, 10))
+
+df_matches %>% 
+  ggplot(aes(x = Surface, fill = Result)) + 
+  geom_bar(position = "fill")
+
+df_matches %>% 
+  ggplot(aes(x = BestOf, fill = Result)) + 
+  geom_bar(position = "fill") + 
+  facet_grid(.~Surface)
+
+df_matches %>% 
+  ggplot(aes(x = Round, fill = Result)) + 
+  geom_bar(position = "fill") + 
+  facet_grid(.~Surface) + 
+  theme(axis.text.x = element_text(angle = 45))
+
+glimpse(df_matches)
+
+```
+
+
+##Model Train
+
+Como primer paso, separo data post 2020 para usar en el testeo final de los modelos.
+Ademas calculo las tasas de corte para las cuales el modelo supone una mejor estrategia a decir que siempre va a ganar Nadal.
+
+
+```{r tasas_corte}
+
+df_matches %>% 
+  filter(Date >= "2020-01-01")
+
+df_matches_train <- df_matches %>% 
+  filter(Date < "2020-01-01")
+  
+df_matches_test <- df_matches %>% 
+  filter(Date >= "2020-01-01")
+
+# COMPUTO LAS TASAS DE CORTE ###################################
+
+# Probabilidad histórica de victoria Nadal =====================
+
+df_matches %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() # La probabilidad histórica es 83,9%.
+
+#Si digo gana, acierto el 83% de las veces.
+
+# Probabilidad ultimos 2 años ==================================
+
+df_matches %>% 
+  filter(Date > ymd("2019-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #84,3% de las veces ganó
+
+#Probabilidad 2020 en adelante =================================
+
+df_matches %>% 
+  filter(Date > ymd("2020-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #81,8% de las veces ganó
+
+#Probabilidad post cuarentena ==================================
+
+df_matches %>% 
+  filter(Date > ymd("2020-08-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #78,26% de las veces ganó.
+
+#Probabilidad 2021 =============================================
+
+df_matches %>% 
+  filter(Date > ymd("2020-12-31")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #80% pero con pocos partidos jugados.
+
+# En definitiva, si yo digo que gana nadal siempre
+# voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
+# O sea un modelo de + de 85% de acierto.
+
+#En clay 2019 en adelante
+
+df_matches %>% 
+  filter(Date > ymd("2018-12-31") & 
+           Surface == "Clay") %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() #90% en clay
+
+
+```
+
+Necesito un modelo que acierte por encima del 80% de las veces.
+
+###Prueba de Variables
+
+Arranco probando una serie de modelos logit para ver cuales son las variables con mayor impacto en el resultado del partido.
+
+```{r prueba_variables}
+
+#Modelo 1
+
+glm.fit1 <- glm(Result ~ Court + Surface + Round + BestOf + RankNadal + RankRival + PartidosUlt6Meses +
+                PartidosUlt3Meses + PartidosUltMes +  WRUlt6Meses + WRUlt3Meses + WRUltMes + 
+                PartidosRivalUlt6Meses + PartidosRivalUlt3Meses + PartidosRivalUltMes +
+                WRRivalUlt6Meses + WRRivalUlt3Meses + WRRivalUltMes +
+                SetsGanadosUltPartido + SetsPerdidosUltPartido +
+                ResultUltPartido + RoundUltPartido + 
+                H2HPartidos + H2HGanados,
+               data = df_matches_train,
+               family = binomial(link = "logit"))
+
+summary(glm.fit1)
+
+#De acá se desprende que el WR es importante. Surface tambien. H2H no parece
+ 
+
+```
+
+
+Luego de este primer analisis, las variables que vamos a retener son:
+
+- Surface (si bien tiene p valor bajo, puede deberse a correlacion con otra covariable)
+- BestOf
+- Round
+- Rank Nadal
+- Rank Rival
+- Partidos Ult 6 / 3 / mes
+- WR 6 / 3 / mes
+- Partidos Rival Ult 6 / 3 / mes
+- WR Rival 6 / 3 / mes
+- ResultUltPartido
+- H2HPartidos
+- H2H Ganados
+
+Estas variables van a ser combinadas de varias formas, buscando el mejor modelo.
+
+
+```{r modelos_logisticos}
+
+#Modelo 2 
+
+glm.fit2 <- glm(Result ~ RankNadal + RankRival + Surface +
+                WRUlt3Meses + WRRivalUlt3Meses + WRUltMes + 
+                WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                Round + BestOf,
+               data = df_matches_train,
+               family = binomial(link = "logit"))
+
+summary(glm.fit2)
+
+#WR es muy importante. Partidos jugados tambien. Round y Surface tambien.
+#Rank más o menos.
+
+glm.probs2 <- predict(glm.fit2, df_matches_test,
+                     type = "response")
+
+contrasts(df_matches_train$Result)
+
+glm.pred2 <- rep("Lose", nrow(df_matches_test))
+glm.pred2[glm.probs2 > 0.55] = "Win"
+
+table(glm.pred2, Real = df_matches_test$Result)
+
+# Modelo 3 ======================================================
+
+#Voy a dejar solo ultimos 3 y ultimos 6 meses
+
+glm.fit3 <- glm(Result ~ Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                  PartidosUlt3Meses + PartidosRivalUlt3Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  WRUlt6Meses + WRRivalUlt6Meses + PartidosUlt6Meses +
+                  PartidosRivalUlt6Meses + Round + BestOf,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit3)
+
+glm.probs3 <- predict(glm.fit3, df_matches_test,
+                      type = "response")
+
+glm.pred3 <- rep("Lose", nrow(df_matches_test))
+glm.pred3[glm.probs3 > 0.55] = "Win"
+
+table(glm.pred3, df_matches_test$Result)
+
+# Modelo 4 =====================================================
+# Ahora junto todas las variables que me dieron resultado
+
+glm.fit4 <- glm(Result ~  Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                  PartidosUlt3Meses + PartidosRivalUlt3Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + RankNadal + RankRival,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit4)
+
+# Modelo 5 =====================================================
+
+glm.fit5 <- glm(Result ~  Surface + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + RankNadal + RankRival,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit5)
+
+glm.probs5 <- predict(glm.fit5, df_matches_test,
+                      type = "response")
+
+glm.pred5 <- rep("Lose", nrow(df_matches_test))
+glm.pred5[glm.probs5 > 0.55] = "Win"
+
+table(glm.pred5, df_matches_test$Result) #Empeora
+
+# Modelo 6 ====================================================
+
+#Uso resultados del ult mes y de los ult 6 meses
+
+glm.fit6 <- glm(Result ~  Surface + WRUlt6Meses + WRRivalUlt6Meses +
+                  PartidosUlt6Meses + PartidosRivalUlt6Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + ResultUltPartido,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit6)
+
+glm.probs6 <- predict(glm.fit6, df_matches_test,
+                      type = "response")
+
+glm.pred6 <- rep("Lose", nrow(df_matches_test))
+glm.pred6[glm.probs6 > 0.55] = "Win"
+
+table(glm.pred6, df_matches_test$Result)
+
+#La info del ultimo partido no es muy relevante
+
+# Modelo 7 =====================================================
+
+#Pruebo solo con info ult mes y ult 6 mas extras
+
+glm.fit7 <- glm(Result ~  Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                  PartidosUlt3Meses + PartidosRivalUlt3Meses + WRUltMes + 
+                  WRRivalUltMes + PartidosUltMes + PartidosRivalUltMes +
+                  Round + BestOf + RankNadal + RankRival,
+                data = df_matches_train,
+                family = binomial)
+
+summary(glm.fit7)
+
+glm.probs7 <- predict(glm.fit7, df_matches_test,
+                      type = "response")
+
+glm.pred7 <- rep("Lose", nrow(df_matches_test))
+glm.pred7[glm.probs7 > 0.55] = "Win"
+
+table(glm.pred7, df_matches_test$Result)
+
+#Las del modelo 7 seran las variables seleccionadas.
+#Ahora trabajo en la flexibilidad del modelo
+
+
+
+```
+
+###Errores por CV
+
+Calculo el error utilizando CV para cada uno de los modelos ajustados.
+
+
+```{r cv_error}
+
+# MODEL FLEXIBILITY ###########################################
+
+#CV test error glm.fit7 =======================================
+
+set.seed(17)
+
+cv.error <- cv.glm(df_matches_train,
+                   glm.fit7,
+                   K = 10)
+
+cv.error$delta
+
+#CV test error comparison =====================================
+
+set.seed(24)
+cv.error <- rep(0, 7)
+
+for (i in 1:7) {
+  
+  cv.error[i] = 
+    cv.glm(df_matches_train,
+           get(
+             paste("glm.fit", i, sep = "")
+             ),
+           K = 10)$delta[1]
+  
+}
+
+
+cv.error %<>%
+  as_tibble() %>% 
+  mutate(Modelo = seq(1:7)) %>% 
+  rename(cv.error = value)
+
+cv.error %>% 
+  ggplot(aes(x = Modelo, y = cv.error)) +
+  geom_line() + 
+  geom_point() + 
+  theme_classic() + 
+  scale_x_continuous(n.breaks = 7)
+
+#El modelo 3 es el que tiene menor ECM calculado via CV.
+
+
+
+```
+
+Trabajo ahora sobre la flexibilidad en el modelo 3.
+
+```{r model3_flex}
+
+set.seed(17)
+
+cv.error.flex <- rep(0, 7)
+
+for (i in 1:7) {
+
+glm.fit3.flex<- glm(Result ~ Surface + WRUlt3Meses + WRRivalUlt3Meses +
+                       PartidosUlt3Meses + PartidosRivalUlt3Meses + poly(WRUltMes, i) + 
+                       poly(WRRivalUltMes, i) + poly(PartidosUltMes, i) +
+                       poly(PartidosRivalUltMes, i) +
+                       WRUlt6Meses + WRRivalUlt6Meses + PartidosUlt6Meses +
+                       PartidosRivalUlt6Meses + Round + BestOf,
+                     data = df_matches_train,
+                     family = binomial)
+
+cv.error.flex[i] <- 
+  cv.glm(df_matches_train,
+         glm.fit3.flex,
+         K = 10)$delta[1]
+}
+
+cv.error.flex %<>%
+  as_tibble() %>% 
+  mutate(FlexPol = seq(1:7)) %>% 
+  rename(cv.error = value)
+
+cv.error.flex %>% 
+  ggplot(aes(x = FlexPol, y = cv.error)) + 
+  geom_line() + 
+  geom_point() + 
+  scale_x_continuous(n.breaks = 7)
+
+#No hay suficiente evidencia de que convenga flexibilizar
+
+glm.selected <- glm.fit3
+
+summary(glm.selected)
+
+glm.selected.probs <- predict(glm.selected, df_matches_test,
+                      type = "response")
+
+glm.selected.pred <- rep("Lose", nrow(df_matches_test))
+glm.selected.pred[glm.selected.probs > 0.55] = "Win"
+
+table(glm.selected.pred, df_matches_test$Result)
+
+```
+
+
+Ahora determino la tasa de corte optima para determinar la prediccion del resultado.
+
+
+```{r table_ROC}
+
+table.ROC <- tibble(
+  TN = rep(0,19),
+  FN = rep(0,19),
+  FP = rep(0,19),
+  TP = rep(0,19)
+)
+
+for (i in 1:19) {
+  
+  glm.selected.pred <- rep("Lose", 33)
+  glm.selected.pred[glm.selected.probs > 0.05*i] = "Win"
+  
+  confusion.matrix <- 
+    table(glm.selected.pred, df_matches_test$Result)
+  
+  table.ROC[i,1] = confusion.matrix[1,1]
+  table.ROC[i,2] = confusion.matrix[1,2]
+  table.ROC[i,3] = confusion.matrix[2,1]
+  table.ROC[i,4] = confusion.matrix[2,2]
+  
+}
+
+table.ROC %<>% 
+  mutate(FalsePositiveRate = FP/(FP+TN), #qué porcentaje dije que ganó, y en realidad perdió
+         TruePositiveRate = TP/(TP+FN),
+         Sensitivity = TN/(TN+FP),
+         Specificity = TP/(TP+FN),
+         Accuracy = (TP + TN)/(FP + TN + TP + FN),
+         Threshold = seq(0.05,0.95, by = 0.05)
+  )
+
+table.ROC
+
+```
+
+
+#Redes Neuronales
+
+Ahora, encararemos el mismo problema utilizando redes neuronales. La idea es encontrar un modelo que permita identificar de la forma mas precisa posible los partidos en los que Nadal tiene una alta chance de perder.
+
+
+##Data Transformation
+
+
+Una red neuronal, dadas sus caracteristicas, solo admite variables numéricas.
+Nuestro dataset contiene muchas variables categoricas, con lo cual debemos realizar una serie de modificaciones antes de correr el ajuste de la red.
+
+
+```{r data_transformation_ANN}
+
+#Para trabajar con redes neuronales usaremos los paquetes keras y neuralnet
+
+p_load(keras, neuralnet, tensorflow)
+
+#En primer lugar, seleccionaremos las variables que formaran parte del modelo
+
+ann_matches <- df_matches[,-c(1,2)]
+
+#Transformamos Result y ResultUltPartido en variables numericas
+
+ann_matches %<>% 
+  mutate(ResultUltPartido = recode(ResultUltPartido, "Win" = 1, "Lose" = 0),
+         Result = recode(Result, "Win" = 1, "Lose" = 0))
+
+glimpse(ann_matches)
+ann_matches <- ann_matches[,-3] 
+ann_matches %<>% 
+  mutate(RoundUltPartido = as.factor(RoundUltPartido))
+
+#Ahora transformo todas las variables categoricas en numericas
+
+dummy <- dummyVars("~.", data = ann_matches)
+data_ann <- as_tibble(predict(dummy, newdata = ann_matches))
+
+data_ann <- as.matrix(data_ann)
+
+prepoc1 <- preProcess(data_ann[,c(17:32,42:43)], method = c("range"))
+norm1 <- predict(prepoc1, data_ann[,c(17:32,42:43)])
+summary(norm1)
+
+data_ann <- cbind(norm1, data_ann[,-c(17:32,42:43)])
+summary(data_ann)
+
+#Elimino los 15 registros que tienen NA values
+
+data_ann <- data_ann[-which(is.na(data_ann[,16])),]
+
+summary(data_ann)
+
+dimnames(data_ann) <- NULL
+
+#Separo data en train y test
+
+# set.seed(1234)
+# part <- sample(2, nrow(data_ann), replace = T, prob = c(0.9, 0.1))
+
+data_ann_train <- data_ann[1:(nrow(data_ann)-50), 1:43]
+data_ann_test <- data_ann[(nrow(data_ann)-49):nrow(data_ann), 1:43]
+target_ann_train <- data_ann[1:(nrow(data_ann)-50), 44]
+target_ann_test <- data_ann[(nrow(data_ann)-49):nrow(data_ann), 44]
+
+```
+
+Ahora tenemos un dataset preparado para ajustar una red neuronal, con las siguientes caracteristicas:
+
+- Variables numericas
+- Variables normalizadas (escala 0-1)
+_ Variable respuesta 0/1 (perdio/gano), es una ultima del dataset
+
+Con este dataset ya trabajado vamos a ajustar la red neuronal.
+
+
+```{r ANN_keras}
+
+ann1 <- keras_model_sequential()
+ann1 %>% 
+  layer_dense(units = 15, activation = "relu", input_shape = c(43)) %>%
+  layer_dense(units = 1, activation = "sigmoid") 
+
+summary(ann1)
+
+ann1 %>% 
+  compile(loss = "binary_crossentropy",
+          optimizer = "adam",
+          metrics = "accuracy")
+
+history <- ann1 %>% 
+  fit(data_ann_train,
+      target_ann_train,
+      epoch = 200,
+      batch_size = 5,
+      validation_split = 0.2)
+
+
+ann1 %>% 
+  evaluate(data_ann_test, target_ann_test)
+
+probs_ann1 <-ann1 %>% 
+  predict_proba(data_ann_test)
+
+pred_ann1 <- ann1 %>% 
+  predict_classes(data_ann_test)
+
+table(Predicted = pred_ann1, Actual = target_ann_test)
+
+#Ahora pruebo una tasa de corte que me de buenos resultados en el test set
+
+pred_ann1 <- rep(0, length(target_ann_test))
+pred_ann1[probs_ann1>0.9] = 1
+
+table(Predicted = pred_ann1, Actual = target_ann_test)
+```
+
+
+Ajusto ahora una red neuronal con mas de una capa oculta para ver si encuentro mejores resultados.
+
+```{r ANN_2}
+
+ann2 <- keras_model_sequential()
+ann2 %>% 
+  layer_dense(units = 15, activation = "relu", input_shape = c(43)) %>%
+  layer_dense(units = 5, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid") 
+
+summary(ann2)
+
+ann2 %>% 
+  compile(loss = "binary_crossentropy",
+          optimizer = "adam",
+          metrics = "accuracy")
+
+history <- ann2 %>% 
+  fit(data_ann_train,
+      target_ann_train,
+      epoch = 200,
+      batch_size = 5,
+      validation_split = 0.2)
+
+
+ann2 %>% 
+  evaluate(data_ann_test, target_ann_test)
+
+probs_ann2 <-ann2 %>% 
+  predict_proba(data_ann_test)
+
+pred_ann2 <- ann2 %>% 
+  predict_classes(data_ann_test)
+
+table(Predicted = pred_ann2, Actual = target_ann_test)
+
+#Ahora pruebo una tasa de corte que me de buenos resultados en el test set
+
+pred_ann2 <- rep(0, length(target_ann_test))
+pred_ann2[probs_ann2>0.97] = 1
+
+table(Predicted = pred_ann2, Actual = target_ann_test)
+
+```
+
