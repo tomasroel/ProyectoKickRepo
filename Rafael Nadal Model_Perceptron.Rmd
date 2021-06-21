@@ -179,8 +179,7 @@ perceptron <- function(x, y, lambda, niter) {
         }
         
         # weight to decide between the two species 
-        print(weight)
-        return(errors)
+        return(list(w = weight, error = errors))
 }
 
 ```
@@ -239,9 +238,58 @@ target_perc_test <- data_perc[(nrow(data_perc)-49):nrow(data_perc), 44]
 #previamente defino los valores de lambda y niter
 
 lam <- 0.1
-niter <- 100
+niter <- 1000
 
-perceptron(data_perc_train, target_perc_train, lam, niter)
+model <- perceptron(data_perc_train, target_perc_train, lam, niter)
+
+#calculo predicciones sobre el dataset de test
+dimnames(data_perc_test) <- NULL
+
+predict_perc <- function(x, corte, model) {
+  
+  pred <- rep(0, nrow(x))
+  
+  for (i in 1:nrow(x)) {
+
+    p <- sum(model$w*c(1,x[i,]))
+  
+    if (p > corte) {
+    pred[i] = 1
+    }
+
+  }
+  
+  return(pred)
+
+}
+
+
+ROC_curve <- tibble(
+  TN = rep(0, 21),
+  FN = rep(0, 21),
+  FP = rep(0, 21),
+  TP = rep(0, 21)
+  # Accuracy = (TP+TN)/(TN+FN+FP+TP),
+  # Sensibilidad = TP/(TP + FN),
+  # RatioFP = FP/(FP + TN)
+)
+
+ROC_curve
+
+for (j in 1:21){
+  
+  corte <- (9+j)/10
+  pred <- predict_perc(data_perc_test, corte, model)
+  
+  ROC_curve[j,1] = table(pred, target_perc_test)[1,1]
+  ROC_curve[j,2] = table(pred, target_perc_test)[1,2]
+  ROC_curve[j,3] = table(pred, target_perc_test)[2,1]
+  ROC_curve[j,4] = table(pred, target_perc_test)[2,2]
+  
+}
+
+
+
 
 
 ```
