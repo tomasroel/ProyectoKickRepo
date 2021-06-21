@@ -14,7 +14,7 @@ Comenzamos haciendo un setup del environment.
 
 
 ```{r setup}
-pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate)
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate, caret)
 
 
 options(scipen = 999)
@@ -68,14 +68,6 @@ df_matches <- df_matches[51:nrow(df_matches),]
 Antes de arrancar con el model train, defino cuales seria un ratio de buena clasificacion aceptable para mi problema.
 
 ```{r tasas_corte}
-df_matches %>% 
-  filter(Date >= "2020-01-01")
-
-df_matches_train <- df_matches %>% 
-  filter(Date < "2020-01-01")
-  
-df_matches_test <- df_matches %>% 
-  filter(Date >= "2020-01-01")
 
 # COMPUTO LAS TASAS DE CORTE ###################################
 
@@ -132,6 +124,125 @@ df_matches %>%
   pull(Result) %>% 
   table() %>% 
   prop.table() #90% en clay
+
+```
+
+
+Para ser considerado como un buen modelo, los ajustes que realice deben obtener como resultado una tasa de buena clasificacion superior al 90% sobre una base de testeo. Modelos con un accuracy inferior no deberian ser tenidos en cuenta ya que la estrategia de predecir que Nadal "gana siempre" tendra un resultado similar.
+
+
+##El Perceptron
+
+En el siguiente apartado vamos a escribir el algoritmo del perceptron que luego entrenaremos con los datos.
+El codigo fue extaido del siguiente post: https://rpubs.com/FaiHas/197581. El mismo fue escrito por Faiyaz Hasan.
+Solo haremos unas pequeñas modificaciones a su aporte.
+
+
+```{r perceptron}
+# write function that takes in the data frame, learning rate - lambda, and number of epochs - n.iter and updates the weight factor. At this stage, I am only concerned with the final weight and the number of epochs required for the weight to converge
+
+perceptron <- function(x, y, lambda, niter) {
+        
+        # initialize weight vector
+        weight <- rep(0, dim(x)[2] + 1)
+        errors <- rep(0, niter)
+        
+        
+        # loop over number of epochs niter
+        for (jj in 1:niter) {
+                
+                # loop through training data set
+                for (ii in 1:length(y)) {
+                        
+                        # Predict binary label using Heaviside activation 
+                        # function
+                        z <- sum(weight[2:length(weight)] * 
+                                         as.numeric(x[ii, ])) + weight[1]
+                        if(z < 0) {
+                                ypred <- -1
+                        } else {
+                                ypred <- 1
+                        }
+                        
+                        # Change weight - the formula doesn't do anything 
+                        # if the predicted value is correct
+                        weightdiff <- lambda * (y[ii] - ypred) * 
+                                c(1, as.numeric(x[ii, ]))
+                        weight <- weight + weightdiff
+                        
+                        # Update error function
+                        if ((y[ii] - ypred) != 0.0) {
+                                errors[jj] <- errors[jj] + 1
+                        }
+                        
+                }
+        }
+        
+        # weight to decide between the two species 
+        print(weight)
+        return(errors)
+}
+
+```
+
+
+##Model Train
+
+Una vez definido el algoritmo, vamos a entrenarlo con la data de partidos que tenemos disponible.
+
+
+```{r model_train}
+#En primer lugar, seleccionaremos las variables que formaran parte del modelo
+
+perc_matches <- df_matches[,-c(1,2)]
+
+#Transformamos Result y ResultUltPartido en variables numericas
+
+perc_matches %<>% 
+  mutate(ResultUltPartido = recode(ResultUltPartido, "Win" = 1, "Lose" = 0),
+         Result = recode(Result, "Win" = 1, "Lose" = 0))
+
+glimpse(perc_matches)
+perc_matches <- perc_matches[,-3] 
+perc_matches %<>% 
+  mutate(RoundUltPartido = as.factor(RoundUltPartido))
+
+#Ahora transformo todas las variables categoricas en numericas
+
+dummy <- dummyVars("~.", data = perc_matches)
+data_perc <- as_tibble(predict(dummy, newdata = perc_matches))
+
+data_perc <- as.matrix(data_perc)
+
+prepoc1 <- preProcess(data_perc[,c(17:32,42:43)], method = c("range"))
+norm1 <- predict(prepoc1, data_perc[,c(17:32,42:43)])
+summary(norm1)
+
+data_perc <- cbind(norm1, data_perc[,-c(17:32,42:43)])
+summary(data_perc)
+
+#Elimino los 15 registros que tienen NA values
+
+data_perc <- data_perc[-which(is.na(data_perc[,16])),]
+
+summary(data_perc)
+
+#Separo data en train y test
+
+data_perc_train <- data_perc[1:(nrow(data_perc)-50), 1:43]
+data_perc_test <- data_perc[(nrow(data_perc)-49):nrow(data_perc), 1:43]
+target_perc_train <- data_perc[1:(nrow(data_perc)-50), 44]
+target_perc_test <- data_perc[(nrow(data_perc)-49):nrow(data_perc), 44]
+
+
+#Ahora con los valores separados, hago el train
+#previamente defino los valores de lambda y niter
+
+lam <- 0.1
+niter <- 100
+
+perceptron(data_perc_train, target_perc_train, lam, niter)
+
 
 ```
 
