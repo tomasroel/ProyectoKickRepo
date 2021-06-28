@@ -1,6 +1,7 @@
 ---
 title: "Rafael Nadal Model - Model Fit"
 output: html_notebook
+author: "Tomás Roel"
 ---
 
 En el presente documento analizaremos los partidos de Nadal en busca de patrones que nos permitan predecir el resultado de su proximo partido.
