@@ -36,7 +36,7 @@ Arrancamos con un setup del environment donde vamos a trabajar.
 ```{r setup}
 #Cargo librerias de interes
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
-               boot, caret, e1071, RCurl)
+               boot, caret, e1071, readr)
 options(scipen = 999) #Elimino notacion cientifica
 ```
 
@@ -45,11 +45,10 @@ Importamos la base de datos con la que trabajaremos.
 
 
 ```{r data_import, warning=FALSE, message=FALSE}
-#importo base con comando import() del paquete rio
-# https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv
-setwd("C:/Users/tomas/OneDrive/Documents/Proyectos 2021/ProyectoKickRepo")
-matches_nadal_ok <- import("Output/matches_nadal_ok.Rdata") %>% 
-  as_tibble()
+#importo base desde repositorio en github
+path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
+matches_nadal_ok <- read_csv(url(path))[,-1]
+
 glimpse(matches_nadal_ok) #vistazo a la base
 
 #separo las variables a utilizar
@@ -156,7 +155,7 @@ Veamos cual seria, estadisticamente, nuestra tasa de acierto si nos jugaramos si
 df_matches %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() # La probabilidad histórica es 83,9%.
+  prop.table() 
 
 #Si digo que siempre gana, acierto el 83% de las veces.
 
@@ -165,28 +164,28 @@ df_matches %>%
   filter(Date > ymd("2019-01-01")) %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() #84,3% de las veces ganó
+  prop.table() 
 
 #Probabilidad 2020 en adelante
 df_matches %>% 
   filter(Date > ymd("2020-01-01")) %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() #81,8% de las veces ganó
+  prop.table() 
 
 #Probabilidad post cuarentena
 df_matches %>% 
   filter(Date > ymd("2020-08-01")) %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() #78,26% de las veces ganó.
+  prop.table() 
 
 #Probabilidad 2021
 df_matches %>% 
   filter(Date > ymd("2020-12-31")) %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() #80% pero con pocos partidos jugados.
+  prop.table() 
 
 # En definitiva, si yo digo que gana nadal siempre
 # voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
@@ -198,19 +197,19 @@ df_matches %>%
            Surface == "Clay") %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() #90% en clay
+  prop.table() 
 
 ```
 
 
-Las tasas historicas de victoria de Rafael Nadal son las siguientes:
+Las tasas historicas de victoria de Rafael Nadal son las siguientes (pueden variar al actualizar la data):
 
 - Historica: 83.9%
-- Ultimos dos años: 84.3%
-- 2020 en adelante: 81,8%
-- Post receso COVID-19: 78,26%
-- 2021: 80%}
-- Clay a partir de 2019: 90%
+- Ultimos dos años: 84.8%
+- 2020 en adelante: 83,6%
+- Post receso COVID-19: 82%
+- 2021: 85%
+- Clay a partir de 2019: 88%
 
 En base a estos numeros, podemos decir que un modelo predictivo, para que sea realmente util, deberia tener una tasa de acierto esperada superior al 90%.
 Un modelo que acierta el resultado en menos del 85% de los partidos no representa ninguna mejora respecto a la "estrategia" de predeccion consistente en decir que siempre gana Nadal.
@@ -231,7 +230,7 @@ Como estrategia de entrenamiento y testeo, entrenamos utilizando k-fold cross va
 En el primer modelo ajustado - modelo 0 - se utilizan todos los features disponibles para modelar el resultado del partido. De este analisis se desprenderan indicios sobre que covariables pueden tener una fuerte relacion con el resultado del partido.
 
 
-```{r prueba_covariables}
+```{r prueba_covariables, warning=FALSE, message=FALSE}
 #Separo partidos post receso. Sera mi base test
 df_matches_train <- df_matches %>% 
   filter(Date < "2020-04-01")
@@ -289,9 +288,9 @@ Para determinar cual es el mejor modelo, compararemos la metrica de error obteni
 La tasa de corte para clasificar los partidos en "win" or "lose" sera del 80%. Es decir, si la probabilidad de victoria predicha por el modelo para un partido es del 80% o mas, ese partido sera clasificado como "win". Si es menor, el resultado predicho sera de "lose".
 
 
-```{r model_train}
+```{r model_train, warning=FALSE, message=FALSE}
 #Armo un listado con todos los modelos que voy a ajustar y sus formulas
-vars <- list(model1 = "Round + PartidosUlt6Meses + PartidosUlt3Meses + PartidosUltMes + WRUlt6Meses + WRUlt3Meses + WRUltMes + PartidosRivalUltMes + WRRivalUltMes + ResultUltPartido + RoundUltPartido",
+vars <- list(model1 = "Round + PartidosUlt6Meses + PartidosUlt3Meses + PartidosUltMes + WRUlt6Meses + WRUlt3Meses + WRUltMes + PartidosRivalUltMes + WRRivalUltMes + ResultUltPartido",
              model2 = "Surface + BestOf + RankNadal + RankRival + Round + PartidosUlt6Meses + PartidosUltMes + WRUlt6Meses + WRUltMes + PartidosRivalUltMes + WRRivalUltMes + ResultUltPartido",
              model3 = "Surface + BestOf + RankNadal + RankRival + Round + PartidosUlt3Meses + PartidosUltMes + WRUlt3Meses + WRUltMes + PartidosRivalUltMes + WRRivalUltMes + ResultUltPartido",
              model4 = "Surface + BestOf + RankNadal + RankRival + Round + PartidosUltMes + WRUltMes + PartidosRivalUltMes + WRRivalUltMes",
@@ -305,6 +304,9 @@ results <- tibble(modelo = paste("glm.fit", 1:6, sep = ""),
                   FP.Ratio.test = rep(0, 6))
 #Defino el train control. Sera repeated CV, con 10 particiones y 10 repeticiones
 trainControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+#Seteo semilla para que los resultados sean reproducibles
+set.seed(1200)
 
 #Defino la tasa de corte para el testeo
 r <- 0.5
@@ -342,6 +344,98 @@ print(results)
 
 ```
 
+Esta tabla resume, para cada modelo, la siguiente informacion:
+
+- Accuracy (porcentaje de aciertos) obtenido via cross-validation.
+- Accuracy (porcentaje de aciertos) obtenido sobre la base de testo (post receso pandemia) con una tasa de corte del 50% (si la probabilidad predicha es superior 50%, se predice "win").
+- False-Positive ratio test: indica el porcentaje de partidos perdidos por Nadal que el modelo predice como "ganados", utilizando la base de testeo post receso. Es decir, son los falsos positivos sobre el total de negativos.
+
+El false-positive ratio es muy importante en este analisis ya que los partidos en los que Nadal sale derrotado son realmente pocos, con lo cual poder identificar esos pocos partidos donde Nadal no gana es algo de gran utilidad.
+
+###Seleccion del Modelo
+
+Basandonos exclusivamente en el error calculado por el metodo de Cross Validation podemos concluir que todos los modelos tienen un rendimiento similar, y este es en general muy bueno. Vamos a seleccionar el modelo numero 3, que es el que tiene el mayor accuracy. Los modelos 2 y 3 tienen una composicion de variables muy similar.
+En el modelo seleccionado se puede observar una accuracy muy alta tanto por CV como en la base de testeo post receso. El false-ratio test es muy alto, pero podremos bajarlo ajustando la tasa de corte o umbral de clasificacion.
 
 
+##Umbral de Clasificacion
 
+Una vez seleccionado el que creemos es nuestro mejor modelo, queda seleccionar el umbral de clasificacion que utlizaremos para clasificar a un partido como "win" o "lose".
+Este umbral se determinara mirando la curva ROC. Esta curva compara, para cada umbral (entre 0 y 1), dos metricas que son importantes y que calcularemos sobre la base de testeo:
+
+- True-Positive Ratio (TPR): es el cociente entre los verdaderos positivos y el total de positivos reales.
+- False-Positive Ratio (FPR): cociente entre falsos positivos y negativos totales.
+
+El umbral optimo de clasificacion será el que nos deje con un alto TPR y un bajo FPR.
+
+```{r curva_ROC}
+#Computo probabilidades utilizando el modelo seleccioado
+probs <- predict(glm.fit3, type = "prob", newdata = df_matches_test)$Win
+
+#Armo factores para curva ROC
+ROC_curve <- tibble(
+  Umbral = rep(0, 39),
+  TN = rep(0, 39),
+  FN = rep(0, 39),
+  FP = rep(0, 39),
+  TP = rep(0, 39))
+
+for (j in 1:39){
+  
+  corte <- j/40
+  pred <- rep("Lose", nrow(df_matches_test))
+  pred[probs > corte] = "Win"
+  
+  ROC_curve[j,1] = corte
+  ROC_curve[j,2] = table(pred, df_matches_test$Result)[1,1]
+  ROC_curve[j,3] = table(pred, df_matches_test$Result)[1,2]
+  ROC_curve[j,4] = table(pred, df_matches_test$Result)[2,1]
+  ROC_curve[j,5] = table(pred, df_matches_test$Result)[2,2]
+  
+  rm(corte, pred)
+  
+}
+
+ROC_curve %<>%
+  mutate(TPR = TP/(TP+FN),
+         FPR = FP/(FP+TN))
+print(ROC_curve)
+
+```
+
+Observando la evolucion del TPR y el FPR, podemos concluir que un umbral de clasificacion razonable y optimo parece ser 0.9.
+
+
+#Resultados Finales
+
+La matriz de confunsion final, para la base de testeo post receso quedaria de la siguiente manera:
+
+```{r matriz_confusion}
+#computo matriz de confusion final para base de testeo
+corte <- 0.9
+pred <- rep("Lose", nrow(df_matches_test))
+pred[probs > corte] = "Win"
+table(pred, real = df_matches_test$Result)
+
+
+```
+
+Se observa que hay solo un partido que queda mal clasificado, al tener Nadal una alta probabilidad de victoria. Veamos de que partido se trata.
+
+```{r outlier}
+#identifico partido mal clasificado
+cual <- which(pred != df_matches_test$Result)
+df_matches_test[cual,]
+
+```
+
+El partido en cuestion corresponde a los cuartos de final del Masters 1000 de Roma, donde Rafael Nadal cayo ante Diego Schwartzman. Sin dudas se trato de una derrota inesperada, ya que la superficie y el ranking jugaban a favor de Nadal. El porcentaje de victorias de Schwartzman en los ultimos 3 meses tampoco era demasiado bueno.
+Sin dudas se trato de un resultado inesperado y, por supuesto, de un gran partido de Diego.
+
+#Conclusion
+
+Como conclusion final, podemos decir que el modelo de regresion logistica funciona muy bien. Sin dudas el fuerte de esta tecnica es su capacidad explicativa, que permite no solo ver que variables son las que muestran una fuerte influencia sobre el resultado sino que ademas podemos ver en que direccion afectan el mismo.
+
+Como modelo predictivo el desempeño tambien es muy bueno, logrando una precision de clasificacion del 95% de los partidos, precision que fue estimada de una forma insesgada utilizando cross validation.
+
+Sin dudas, lo mas importante es la capacidad del modelo para detectar aquellos partidos en donde Nadal pierde, ya que es algo que rara vez sucede.
