@@ -36,7 +36,7 @@ Arrancamos con un setup del environment donde vamos a trabajar.
 ```{r setup}
 #Cargo librerias de interes
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
-               boot, caret, e1071)
+               boot, caret, e1071, RCurl)
 options(scipen = 999) #Elimino notacion cientifica
 ```
 
@@ -46,6 +46,7 @@ Importamos la base de datos con la que trabajaremos.
 
 ```{r data_import, warning=FALSE, message=FALSE}
 #importo base con comando import() del paquete rio
+# https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv
 setwd("C:/Users/tomas/OneDrive/Documents/Proyectos 2021/ProyectoKickRepo")
 matches_nadal_ok <- import("Output/matches_nadal_ok.Rdata") %>% 
   as_tibble()
