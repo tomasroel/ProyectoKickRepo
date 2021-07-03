@@ -1,0 +1,71 @@
+---
+title: "Support Vector Machines - Aplicación en el Tenis"
+Author: "Tomás Roel"
+Date: "July 20, 2021"
+output: 
+  html_notebook: 
+    theme: paper
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+# Introducción
+
+Este documento es una continuación del primer trabajo realizado acerca clasificación en partidos de tenis, el cual podrán encontrar siguiendo este link *inserte link Regresion Logistica* y en el cual se aplican modelos de Regresión Logística para intentar predecir el resultado de un partido de tenis de Rafael Nadal, partido que solo tiene dos resultados posibles: victoria o derrota.
+
+Repasando el problema, el mismo consiste en utilizar un set de variables acerca del contexto del partido y de la condición en que cada uno de los tenistas llega a disputar el encuentro para predecir quién será el ganador del mismo.
+
+### Support Vector Machines
+
+En esta ocasión, probaremos un modelo un tanto más complejo que el modelo de Regresión Logística. Trabajaremos con Support Vector Machines, un método muy flexible, utilizado principalmente para problemas de clasificación binaria y que en general tiene muy buena performance en problemas complejos.
+
+No ahondaremos en una descripción detallada del método ya que existe vasta literatura acerca del mismo. Solo diremos que lo que el método intenta buscar para separar las clases (victoria y derrota, "win" y "lose" en nuestro problema) es el mejor hiperplano separador que exista.
+Ahora bien, si este méotodo separa con un hiperplano, para obtener un buen resultado necesitaríamos aplicarlo a clases que sean linealmente separables. De ser así, esto sería una gran limitación para el método, pero es justamente algo que logra superar utilizando una técnica que se conoce como *kernel trick* y es la clave de por qué este método es tan potente.
+Esencialmente, el *kernel trick*  consiste en aumentar la dimensionalidad del problema, llevándolo a un terreno más complejo donde ahora las clases sí sean linealmente separables y donde pueda calcular el hiperplano separador de forma correcta.
+
+# Desarrollo
+
+En las próximas secciones iremos desarrollando, paso a paso, la aplicación de Support Vector Machines (SVM de ahora en más) a nuestro problema de clasificación. Todo el trabajo ha sido realizado usando R como herramienta principal.
+
+### Setup
+
+Arrancamos con un setup del environment donde vamos a trabajar.
+
+```{r setup}
+#Cargo librerias de interes
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
+               boot, caret, e1071, readr)
+options(scipen = 999) #Elimino notacion cientifica
+```
+
+Importamos la base de datos con la que trabajaremos.
+
+```{r data_import, warning=FALSE, message=FALSE}
+#importo base desde repositorio en github
+path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
+matches_nadal_ok <- read_csv(url(path))[,-1]
+
+glimpse(matches_nadal_ok) #vistazo a la base
+
+#separo las variables a utilizar
+variables <- c("Location", "Series", "Court", "Surface", "Date",
+               "Round", "BestOf", "RankNadal", "RankRival",
+               "PartidosUlt6Meses", "PartidosUlt3Meses", "PartidosUltMes",
+               "WRUlt6Meses", "WRUlt3Meses", "WRUltMes",
+               "PartidosRivalUlt6Meses", "PartidosRivalUlt3Meses",
+               "PartidosRivalUltMes", "WRRivalUlt6Meses", "WRRivalUlt3Meses",
+               "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
+               "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
+               "Result")
+
+df_matches <- matches_nadal_ok %>% 
+  select(all_of(variables))
+glimpse(df_matches)
+
+```
+
+Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos valores, "win" o "lose". El resto de las variables aportan información sobre el contexto en el cual se está jugando el partido (superficie, cantidad del sets a disputar, ronda, etc.) y también aportan información sobre la condición previa en que llega cada jugador al partido (ranking, cantidad de partidos jugados, porcentaje de partidos ganados, resultado del último partido, etc.)
+
