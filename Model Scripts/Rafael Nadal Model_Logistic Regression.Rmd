@@ -1,5 +1,5 @@
 ---
-title: "Regresión Logística en el Tenis"
+title: "Regresión Logística - Aplicación en el Tenis"
 author: "Tomás Roel"
 date: "July 20, 2021"
 output:
@@ -16,12 +16,12 @@ text-align: justify}
 
 # Introducción
 
-En la previa a un partido de tenis importante para nuestro tenista favorito, o también en la de un partido de fútbol del equipo en cual somos hinchas, uno puede preguntarse: ¿cuáles son las chances de obtener una victoria?
+En la previa de un partido de tenis importante para nuestro tenista favorito, o también en la de un partido de fútbol del equipo del cual somos hinchas, uno puede preguntarse: ¿cuáles son las chances de obtener una victoria?
 Para intentar responder esta pregunta, los métodos y algoritmos de la ciencia de datos nos pueden ser de gran ayuda.
 
-En este trabajo se aplicará la tecnica de regresión logística para intentar, en primer lugar, identificar variables que puedan explicar el resultado de un partido de tenis y, en segundo lugar, utilizar esas mismas variables (u otras) para predecir el resultado del mismo.
+En este trabajo se aplicará la técnica de regresión logística para intentar, en primer lugar, identificar variables que puedan explicar el resultado de un partido de tenis y, en segundo lugar, utilizar esas mismas variables (u otras) para predecir el resultado del mismo.
 
-No ahondaremos en la descripción detallada del modelo de regresión logística, ya que existe una gran cantidad de información acerca del mismo. Solo diremos que se trata de un modelo paramétrico, un caso particular de Modelo Lineal Generalizado (GLM), y que estos ultimos vienen a generalizar a los modelos de regresión lineal tradicionales que todos conocemos.
+No ahondaremos en la descripción detallada del modelo de regresión logística, ya que existe una gran cantidad de información acerca del mismo. Solo diremos que se trata de un modelo paramétrico, un caso particular de Modelo Lineal Generalizado (GLM), y que estos últimos vienen a generalizar a los modelos de regresión lineal tradicionales que todos conocemos.
 En síntesis, es un modelo lineal adaptado para intentar resolver un problema de clasificación binaria, como puede ser el problema de modelar el resultado de un partido de tenis que tiene solo dos resultados posibles desde la óptica de nuestro jugador favorito: victoria o derrota.
 
 
@@ -77,7 +77,7 @@ df_matches <- matches_nadal_ok %>%
 glimpse(df_matches)
 
 ```
-Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos valores, "win" o "lose". El resto de las variables aportan información sobre el contexto en el cual se está jugando el partido (superficie, cantidad del sets a disputar, ronda, etc.) y también aportan información sobre la condición previa en que llega cada jugador al partido (ranking, cantidad de partidos jugados, porcentaje de partidos ganados, resultado del último partido, etc.)
+Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos valores, "win" o "lose". El resto de las variables aportan información sobre el contexto en el cual se está jugando el partido (superficie, cantidad de sets a disputar, ronda, etc.) y también aportan información sobre la condición previa en que llega cada jugador al partido (ranking, cantidad de partidos jugados, porcentaje de partidos ganados, resultado del último partido, etc.)
 
 
 ## Data Wrangling
@@ -99,7 +99,7 @@ df_matches <- df_matches[51:nrow(df_matches),]
 
 ## Plots
 
-Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver como varia el porcentaje de victorias de Rafel Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
+Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver cómo varía el porcentaje de victorias de Rafel Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
 
 
 ```{r plots}
@@ -148,7 +148,7 @@ Obtenemos algunas conclusiones interesantes de estos gráficos:
 
 - Cuando Nadal llega con ritmo (cantidad de partidos) y con buen porcentaje de victorias (WR) parece ser más probable que obtenga una victoria en el partido.
 - Si el rival forma parte del top 10, las chances de derrota son mayores.
-- El clay es sin dudas la superficie que mejor le sienta.
+- El clay (polvo de ladrillo) es sin dudas la superficie que mejor le sienta.
 - A 5 sets parece haber una mejor performance en general de Nadal.
 - En las primeras rondas del torneo tiende a tener un porcentaje de victorias mayor.
 
@@ -158,9 +158,9 @@ Con esto, claramente, no descubrimos nada nuevo. La intención ahora es utilizar
 ## Tasas de Corte
 
 Vamos a utilizar un modelo logístico para predecir un resultado de un partido de tenis de Nadal. Ahora bien, cuando miremos los resultados de clasificación del modelo, ¿qué tasa de aciertos consideraremos como "buena"?
-Nadal, de por sí, gana la gran mayoría de partidos en los que participa, con lo cual una buena estrategia para "predecir" el resultado del partido parece ser decir que siempre va a ganar Nadal, sin tener en cuenta ninguna varaible adicional.
+Nadal, de por sí, gana la gran mayoría de partidos en los que participa, con lo cual una buena estrategia para "predecir" el resultado del partido parece ser decir que siempre va a ganar Nadal, sin tener en cuenta ninguna variable adicional.
 
-Veamos cual seria, estadísticamente, nuestra tasa de acierto si nos jugaramos siempre a que gana Nadal.
+Veamos cuál seria, estadísticamente, nuestra tasa de acierto si nos jugáramos siempre a que gana Nadal.
 
 ```{r tasas_corte}
 #Probabilidad histórica de victoria Nadal
@@ -217,11 +217,11 @@ df_matches %>%
 Las tasas históricas de victoria de Rafael Nadal son las siguientes (pueden variar al actualizar la data):
 
 - Histórica: 83.9%
-- Últimos dos años: 84.8%
+- Últimos dos años: 84.7%
 - 2020 en adelante: 83,6%
 - Post receso COVID-19: 82%
 - 2021: 85%
-- Clay a partir de 2019: 88%
+- Clay a partir de 2019: 87.5%
 
 En base a estos números, podemos decir que un modelo predictivo, para que sea realmente útil, debería tener una tasa de acierto esperada superior al 90%.
 Un modelo que acierta el resultado en menos del 85% de los partidos no representa ninguna mejora respecto a la "estrategia" de predección consistente en decir que siempre gana Nadal.
@@ -229,17 +229,17 @@ Un modelo que acierta el resultado en menos del 85% de los partidos no represent
 
 ## Model Train
 
-Ahora si, ya con una primera impresión de como se ven los datos y como podrian afectar las covariables al resultado del partido, comenzamos a ajustar los modelos.
+Ahora sí, ya con una primera impresión de cómo se ven los datos y cómo podrían afectar las covariables al resultado del partido, comenzamos a ajustar los modelos.
 
 Como primer paso, vamos a ajustar un modelo con todas las covariables disponibles como predictoras. La función de linkeo con la que trabajaremos es la función 'logit'.
 
 ### Estrategia de Entrenamiento-Testeo
 
-Como estrategia de entrenamiento y testeo, entrenamos utilizando *k-fold cross validation* para obtener una medida del error que no este sesgada por los datos. Este entrenamiento se realizara solo con los partidos previos a abril 2020 (inicio de la pandemia COVID-19). Los partidos post receso por pandemia serán utilizados como base de testeo, donde se analizará de forma mas precisa la performance predictiva del modelo.
+Como estrategia de entrenamiento y testeo, entrenamos utilizando *k-fold cross validation* para obtener una medida del error que no esté sesgada por los datos. Este entrenamiento se realizará solo con los partidos previos a abril 2020 (inicio de la pandemia COVID-19). Los partidos post receso por pandemia serán utilizados como base de testeo, donde se analizará de forma mas precisa la performance predictiva del modelo.
 
 ### Modelo 0: prueba de covariables
 
-En el primer modelo ajustado - modelo 0 - se utilizan todos los features disponibles para modelar el resultado del partido. De este análisis se desprenderan indicios sobre cuáles covariables pueden tener una fuerte relación con el resultado del partido.
+En el primer modelo ajustado - modelo 0 - se utilizan todos los features disponibles para modelar el resultado del partido. De este análisis se desprenderán indicios sobre cuáles covariables pueden tener una fuerte relación con el resultado del partido.
 
 
 ```{r prueba_covariables, warning=FALSE, message=FALSE}
@@ -274,30 +274,30 @@ glm.fit0 #se puede observar que el accuracy, utilizando CV, es de 0.94.
 summary(glm.fit0)
 ```
 
-Mirando los p-valor de los coeficientes del modelo podemos ver que hay algunas variables que tienen un impacto significativo en el resultado del partido. Estas son:
+Mirando los p-value de los coeficientes del modelo podemos ver que hay algunas variables que tienen un impacto significativo en el resultado del partido. Éstas son:
 
 - Round: la instancia en el torneo a la cual corresponde el partido.
-- Partidos jugados en los ultimos 6 meses.
-- Partidos jugados en los ultimos 3 meses.
-- Partidos jugados en el ultimo mes.
-- Win Rate en los ultimos 6 meses.
-- Win Rate en los ultimos 3 meses.
-- Win Rate en el ultimo mes.
-- Partidos jugados por el rival en el ultimo mes.
-- Win Rate del rival en el ultimo mes.
+- Partidos jugados en los últimos 6 meses.
+- Partidos jugados en los últimos 3 meses.
+- Partidos jugados en el último mes.
+- Win Rate en los últimos 6 meses.
+- Win Rate en los últimos 3 meses.
+- Win Rate en el último mes.
+- Partidos jugados por el rival en el último mes.
+- Win Rate del rival en el último mes.
 - Resultado del último partido.
 - Ronda del último partido
 
 Estas variables parecen tener una importante capacidad para explicar el resultado del partido.
-Las variables mas importantes parecen ser la cantidad de partidos jugados en el último mes y el porcentaje de victorias en este. Estas dos dan un indicio de cómo llega el jugador al partido, es decir si llega con ritmo y en racha.
-Otra variable imporante parece ser la ronda a la que corresponde el partido, sobre todo si se trata de la final. Allí el modelo identifica que Nadal tiene altas chances de ganar.
-La cantidad de partidos jugados y el porcentaje de victorias del rival tambien parecen ser muy importantes, ya que indican en que condiciones llega el rival al partido.
+Las variables más importantes parecen ser la cantidad de partidos jugados en el último mes y el porcentaje de victorias en éste. Éstas dos dan un indicio de cómo llega el jugador al partido, es decir si llega con ritmo y en racha.
+Otra variable importante parece ser la ronda a la que corresponde el partido, sobre todo si se trata de la final. Allí el modelo identifica que Nadal tiene altas chances de ganar.
+La cantidad de partidos jugados y el porcentaje de victorias del rival tambien parecen ser muy importantes, ya que indican en qué condiciones llega el rival al partido.
 
 ### Ajuste de Modelos
 
-Ahora, ajustaremos una serie de modelos, buscando el de mejor performance predictiva. La selección de covariables a utilizar en cada ajusta estara basada en las conclusiones obtenidas del modelo 0.
-Para determinar cual es el mejor modelo, compararemos la métrica de error obtenida del entrenamiento vía cross validation. Tambien utilizaremos el dataset de testeo para valuar performance en este.
-La tasa de corte para clasificar los partidos en "win" or "lose" sera del 80%. Es decir, si la probabilidad de victoria predicha por el modelo para un partido es del 80% o mas, ese partido sera clasificado como "win". Si es menor, el resultado predicho sera de "lose".
+Ahora, ajustaremos una serie de modelos, buscando el de mejor performance predictiva. La selección de covariables a utilizar en cada ajuste estará basada en las conclusiones obtenidas del modelo 0.
+Para determinar cuál es el mejor modelo, compararemos la métrica de error obtenida del entrenamiento vía cross validation. También utilizaremos el dataset de testeo para valuar performance en éste.
+La tasa de corte para clasificar los partidos en "win" o "lose" será del 80%. Es decir, si la probabilidad de victoria predicha por el modelo para un partido es del 80% o mas, ese partido será clasificado como "win". Si es menor, el resultado predicho será de "lose".
 
 
 ```{r model_train, warning=FALSE, message=FALSE}
@@ -321,7 +321,7 @@ trainControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
 set.seed(1200)
 
 #Defino la tasa de corte para el testeo
-r <- 0.5
+r <- 0.8
 
 for (i in (1:nrow(results))) {
   
@@ -352,21 +352,21 @@ for (i in (1:nrow(results))) {
 
 }
 
-print(results)
+results
 
 ```
 
 Esta tabla resume, para cada modelo, la siguiente información:
 
 - Accuracy (porcentaje de aciertos) obtenido vía cross-validation.
-- Accuracy (porcentaje de aciertos) obtenido sobre la base de testo (post receso pandemia) con una tasa de corte del 50% (si la probabilidad predicha es superior 50%, se predice "win").
+- Accuracy (porcentaje de aciertos) obtenido sobre la base de testo (post receso pandemia) con una tasa de corte del 80% (si la probabilidad predicha es superior 80%, se predice "win").
 - False-Positive ratio test: indica el porcentaje de partidos perdidos por Nadal que el modelo predice como "ganados", utilizando la base de testeo post receso. Es decir, son los falsos positivos sobre el total de negativos.
 
 El false-positive ratio es muy importante en este análisis ya que los partidos en los que Nadal sale derrotado son realmente pocos, con lo cual poder identificar esos pocos partidos donde Nadal no gana es algo de gran utilidad.
 
 ### Selección del Modelo
 
-Basandonos exclusivamente en el error calculado por el método de Cross Validation podemos concluir que todos los modelos tienen un rendimiento similar, y este es en general muy bueno. Vamos a seleccionar el modelo número 3, que es el que tiene el mayor accuracy. Los modelos 2 y 3 tienen una composición de variables muy similar.
+Basándonos exclusivamente en el error calculado por el método de cross validation podemos concluir que todos los modelos tienen un rendimiento similar, y éste es en general muy bueno. Vamos a seleccionar el modelo número 3, que es el que tiene el mayor accuracy. Los modelos 2 y 3 tienen una composición de variables muy similar.
 En el modelo seleccionado se puede observar una accuracy muy alta tanto por CV como en la base de testeo post receso. El false-ratio test es muy alto, pero podremos bajarlo ajustando la tasa de corte o umbral de clasificación.
 
 
@@ -378,7 +378,7 @@ Este umbral se determinara mirando la curva ROC. Esta curva compara, para cada u
 - True-Positive Ratio (TPR): es el cociente entre los verdaderos positivos y el total de positivos reales.
 - False-Positive Ratio (FPR): cociente entre falsos positivos y negativos totales.
 
-El umbral optimo de clasificacion será el que nos deje con un alto TPR y un bajo FPR.
+El umbral óptimo de clasificación será el que nos deje con un alto TPR y un bajo FPR.
 
 ```{r curva_ROC}
 #Computo probabilidades utilizando el modelo seleccioado
@@ -411,20 +411,20 @@ for (j in 1:39){
 ROC_curve %<>%
   mutate(TPR = TP/(TP+FN),
          FPR = FP/(FP+TN))
-print(ROC_curve)
+ROC_curve
 
 ```
 
-Observando la evolucion del TPR y el FPR, podemos concluir que un umbral de clasificacion razonable y optimo parece ser 0.9.
+Observando la evolución del TPR y el FPR, podemos concluir que un umbral de clasificación razonable y óptimo parece ser 0.925.
 
 
 # Resultados Finales
 
-La matriz de confunsion final, para la base de testeo post receso quedaría de la siguiente manera:
+La matriz de confunsión final, para la base de testeo post receso quedaría de la siguiente manera:
 
 ```{r matriz_confusion}
 #computo matriz de confusion final para base de testeo
-corte <- 0.9
+corte <- 0.925
 pred <- rep("Lose", nrow(df_matches_test))
 pred[probs > corte] = "Win"
 table(pred, real = df_matches_test$Result)
@@ -432,7 +432,7 @@ table(pred, real = df_matches_test$Result)
 
 ```
 
-Se observa que hay solo un partido que queda mal clasificado, al tener Nadal una alta probabilidad de victoria. Veamos de que partido se trata.
+Se observa que hay solo un partido que queda mal clasificado, al tener Nadal una alta probabilidad de victoria. Veamos de qué partido se trata.
 
 ```{r outlier}
 #identifico partido mal clasificado
@@ -441,15 +441,15 @@ df_matches_test[cual,]
 
 ```
 
-El partido en cuestion corresponde a los cuartos de final del Masters 1000 de Roma, donde Rafael Nadal cayo ante Diego Schwartzman. Sin dudas se trato de una derrota inesperada, ya que la superficie y el ranking jugaban a favor de Nadal. El porcentaje de victorias de Schwartzman en los ultimos 3 meses tampoco era demasiado bueno.
+El partido en cuestión corresponde a los cuartos de final del Masters 1000 de Roma, donde Rafael Nadal cayo ante Diego Schwartzman. Sin dudas se trató de una derrota inesperada, ya que la superficie y el ranking jugaban a favor de Nadal. El porcentaje de victorias de Schwartzman en los últimos 3 meses tampoco era demasiado bueno.
 Sin dudas se trato de un resultado inesperado y, por supuesto, de un gran partido de Diego.
 
 # Conclusión
 
-Como conclusion final, podemos decir que el modelo de regresión logística funciona muy bien para predecir el resultado de un partido de Rafael Nadal. Sin dudas el fuerte de esta técnica es su capacidad explicativa, que permite no solo ver qué variables son las que muestran una fuerte influencia sobre el resultado sino que además podemos ver en qué dirección afectan el mismo.
+Como conclusión final, podemos decir que el modelo de regresión logística funciona muy bien para predecir el resultado de un partido de Rafael Nadal. Sin dudas el fuerte de esta técnica es su capacidad explicativa, que permite no solo ver qué variables son las que muestran una fuerte influencia sobre el resultado sino que además podemos ver en qué dirección afectan el mismo.
 
-Como modelo predictivo el desempeño tambien es muy bueno, logrando una precisión de clasificación del 95%, precisión que fue estimada de una forma insesgada utilizando cross validation.
+Como modelo predictivo el desempeño también es muy bueno, logrando una precisión de clasificación del 95%, precisión que fue estimada de una forma insesgada utilizando cross validation.
 
-Sin dudas, lo mas importante es la capacidad del modelo para detectar aquellos partidos en donde Nadal pierde, ya que es algo que rara vez sucede.
+Sin dudas, lo más importante es la capacidad del modelo para detectar aquellos partidos en donde Nadal pierde, ya que es algo que rara vez sucede.
 
 
