@@ -3,10 +3,10 @@ title: "Regresión Logística - Aplicación en el Tenis"
 author: "Tomás Roel"
 date: "July 5, 2021"
 output:
-  html_document:
-    df_print: paged
   html_notebook:
     theme: paper
+  html_document:
+    df_print: paged
 ---
 
 <style>
@@ -46,8 +46,10 @@ Arrancamos con un setup del environment donde vamos a trabajar.
 ```{r setup}
 #Cargo librerias de interes
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
-               boot, caret, e1071, readr)
+               boot, caret, e1071, readr, correlation, see, ggraph,
+               RColorBrewer, ggthemes, psych)
 options(scipen = 999) #Elimino notacion cientifica
+
 ```
 
 
@@ -73,7 +75,10 @@ variables <- c("Location", "Series", "Court", "Surface", "Date",
                "Result")
 
 df_matches <- matches_nadal_ok %>% 
-  select(all_of(variables))
+  select(all_of(variables)) %>% 
+  mutate_at(vars(Location, Series, Court, Surface,
+                 Round, BestOf, ResultUltPartido, RoundUltPartido, Result),
+            as.factor)
 glimpse(df_matches)
 
 ```
@@ -107,41 +112,76 @@ Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos p
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
              color = Result)) + 
-  geom_jitter(width = 1.5) #Cuando llega al match con muchos partidos y con alto win rate hay mas chances de una victoria
+  geom_jitter(width = 1.5) +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Partidos Nadal Últimos 6 Meses",
+       y = "Win Rate Nadal Últimos 6 Meses") + 
+  theme_few()
+  #Cuando llega al match con muchos partidos y con alto win rate hay mas chances de una victoria
 
 df_matches %>% 
   ggplot(aes(x = RankNadal, y = RankRival,
              color = Result)) + 
   geom_jitter() + 
   coord_cartesian(ylim = c(0, 20),
-                  xlim = c(0, 10)) #Hay mayores posibilidades de derrota si el rival forma parte del top 10
+                  xlim = c(0, 10)) +
+  scale_x_continuous(breaks = c(1,3,5,7,9)) +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Ranking Nadal",
+       y = "Ranking Rival") + 
+  theme_few()#Hay mayores posibilidades de derrota si el rival forma parte del top 10
 
 df_matches %>% 
   ggplot(aes(x = Surface, fill = Result)) + 
-  geom_bar(position = "fill") #Clay es sin dudas las superficie de mayor performance
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Surface") + 
+  theme_few()#Clay es sin dudas las superficie de mayor performance
 
 df_matches %>% 
   ggplot(aes(x = BestOf, fill = Result)) + 
   geom_bar(position = "fill") + 
-  facet_grid(.~Surface) #A 5 sets parece rendir mejor Nadal
+  facet_grid(.~Surface) +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Best Of") + 
+  theme_few()#A 5 sets parece rendir mejor Nadal
 
 df_matches %>% 
   ggplot(aes(x = Round, fill = Result)) + 
   geom_bar(position = "fill") + 
   facet_grid(.~Surface) + 
-  theme(axis.text.x = element_text(angle = 45)) #En las primeras rondas el % de victorias en mayor
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Round",
+       y = "Porcentaje de victorias") + 
+  theme_few() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   size = 6,
+                                   vjust = 1,
+                                   hjust = 1)) #En las primeras rondas el % de victorias en mayor
 
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = PartidosUlt3Meses)) +
-  geom_jitter() #hay correlacion entre estas dos variables.
+  geom_jitter() +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Partidos Nadal Últimos 6 Meses",
+       y = "Partidos Nadal Últimos 3 Meses") + 
+  theme_few()#hay correlacion entre estas dos variables.
 
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = PartidosUltMes)) +
-  geom_jitter() #Entre estas no tanto
+  geom_jitter() +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Partidos Nadal Últimos 6 Meses",
+       y = "Partidos Nadal Último Mes") + 
+  theme_few()#Entre estas no tanto
 
 df_matches %>% 
   ggplot(aes(x = PartidosUlt3Meses, y = PartidosUltMes)) +
-  geom_jitter() #Entre estas algo, menos que para 3 y 6
+  geom_jitter() +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Partidos Nadal Últimos 3 Meses",
+       y = "Partidos Nadal Último Mes") + 
+  theme_few()#Entre estas algo, menos que para 3 y 6
 ```
 
 Obtenemos algunas conclusiones de estos gráficos:
@@ -154,6 +194,28 @@ Obtenemos algunas conclusiones de estos gráficos:
 
 Con esto, claramente, no descubrimos nada nuevo. La intención ahora es utilizar estas conclusiones para modelar la probabilidad de victoria en un partido de Nadal, y en base a ello poder predecir el resultado del partido.
 
+## Correlaciones entre Variables
+
+Un punto sumamente importante a revisar previo al ajuste de modelos es el de las correlaciones parciales entre los variables que disponemos.
+Con la base de datos disponible, calculamos las correlaciones entre cada una de las variables y vemos qué conclusiones podemos sacar.
+
+
+```{r correlations, message=FALSE, warning=FALSE}
+
+correlation(df_matches[,c(3:4,6:28)] %>% 
+              filter(!is.na(SetsPerdidosUltPartido) & !is.na(RoundUltPartido)),
+            include_factors = TRUE,
+            method = "auto") %>% 
+  as_tibble() %>% 
+  arrange(desc(r))
+  
+
+```
+Las variables con una alta correlación (ya sea positiva o negativa) no deberían ser utilizadas de forma conjunta como predictoras en un modelo de regresión ya que afectan de forma negativa el resultado del mismo.
+
+Analizando la tabla de correlaciones podemos sacar conclusiones que en principio pueden parecer triviales, por ejemplo que hay una alta correlación entre la variable 'Round' y la variable 'RoundUltPartido'. También podemos obtener otras conclusiones más importantes, como por ejemplo que existe una alta correlación positiva ente el win rate de los últimos 6 y 3 meses, tanto para los rivales como para Nadal. Lo mismo pasa entre el win rate de los últimos 3 meses y el del último mes.
+
+A la hora de elegir combinaciones de predictoras tendremos entonces que prestar atención a estos resultados e intentar combinar variables con poca correlación, como pueden ser la variable win rate del último mes con la variable win rate de los últimos 6 meses.
 
 ## Tasas de Corte
 
