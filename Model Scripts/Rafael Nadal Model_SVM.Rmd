@@ -1,7 +1,7 @@
 ---
 title: "Support Vector Machines - Aplicación en el Tenis"
-Author: "Tomás Roel"
-Date: "July 20, 2021"
+author: "Tomás Roel"
+date: "July 20, 2021"
 output: 
   html_notebook: 
     theme: paper
@@ -14,7 +14,7 @@ text-align: justify}
 
 # Introducción
 
-Este documento es una continuación del primer trabajo realizado acerca clasificación en partidos de tenis, el cual podrán encontrar siguiendo este link *inserte link Regresion Logistica* y en el cual se aplican modelos de Regresión Logística para intentar predecir el resultado de un partido de tenis de Rafael Nadal, partido que solo tiene dos resultados posibles: victoria o derrota.
+Este documento es una continuación del primer trabajo realizado acerca clasificación en partidos de tenis, el cual podrán encontrar siguiendo este link *https://rpubs.com/tomroel/regresion-logistica-rafael-nadal* y en el cual se aplican modelos de Regresión Logística para intentar predecir el resultado de un partido de tenis de Rafael Nadal, partido que solo tiene dos resultados posibles: victoria o derrota.
 
 Repasando el problema, el mismo consiste en utilizar un set de variables acerca del contexto del partido y de la condición en que cada uno de los tenistas llega a disputar el encuentro para predecir quién será el ganador del mismo.
 
@@ -22,9 +22,9 @@ Repasando el problema, el mismo consiste en utilizar un set de variables acerca 
 
 En esta ocasión, probaremos un modelo un tanto más complejo que el modelo de Regresión Logística. Trabajaremos con Support Vector Machines, un método muy flexible, utilizado principalmente para problemas de clasificación binaria y que en general tiene muy buena performance en problemas complejos.
 
-No ahondaremos en una descripción detallada del método ya que existe vasta literatura acerca del mismo. Solo diremos que lo que el método intenta buscar para separar las clases (victoria y derrota, "win" y "lose" en nuestro problema) es el mejor hiperplano separador que exista.
-Ahora bien, si este méotodo separa con un hiperplano, para obtener un buen resultado necesitaríamos aplicarlo a clases que sean linealmente separables. De ser así, esto sería una gran limitación para el método, pero es justamente algo que logra superar utilizando una técnica que se conoce como *kernel trick* y es la clave de por qué este método es tan potente.
-Esencialmente, el *kernel trick*  consiste en aumentar la dimensionalidad del problema, llevándolo a un terreno más complejo donde ahora las clases sí sean linealmente separables y donde pueda calcular el hiperplano separador de forma correcta.
+No ahondaremos en una descripción detallada del método ya que existe vasta literatura acerca del mismo. Solo diremos que lo que el método intenta buscar para separar las clases (victoria y derrota, "win" y "lose" en nuestro problema) es el mejor hiperplano separador que exista, entendiendo por hiperplano separador aquel que deje el mayor margen posible entre las clases.
+Ahora bien, si este método separa con un hiperplano, para obtener un buen resultado necesitaríamos aplicarlo a clases que sean linealmente separables. De ser así, esto sería una gran limitación para el método ya que son pocos los problemas que cuentan con estas características. Afortunadamente, Support Vector Machines logra superar este inconveniente utilizando una técnica que se conoce como *kernel trick* y es la clave de por qué este método es tan potente.
+Esencialmente, el *kernel trick* consiste en aplicar una transformación a las observaciones con el objetivo de aumentar la dimensionalidad del problema, llevándolo a un terreno más complejo donde ahora las clases sí sean linealmente separables y donde pueda calcular el hiperplano separador de forma correcta.
 
 # Desarrollo
 
@@ -69,3 +69,147 @@ glimpse(df_matches)
 
 Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos valores, "win" o "lose". El resto de las variables aportan información sobre el contexto en el cual se está jugando el partido (superficie, cantidad del sets a disputar, ronda, etc.) y también aportan información sobre la condición previa en que llega cada jugador al partido (ranking, cantidad de partidos jugados, porcentaje de partidos ganados, resultado del último partido, etc.)
 
+## Data Wrangling
+
+Con la base ya cargada, hacemos unos ajustes necesarios previos al análisis.
+
+
+```{r data_wrangling}
+#Elimino observaciones que no me sirven porque no tengo registro de los partidos anteriores
+df_matches %>%
+  select(Location, RankNadal,
+         PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
+ print(n = 70)
+
+#Elimino primeras 50 observaciones, a partir de ahi se nivela
+df_matches <- df_matches[51:nrow(df_matches),]
+
+```
+
+## Plots
+
+Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver cómo varía el porcentaje de victorias de Rafel Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
+
+```{r plots}
+#Arranco mirando resultado segun el rendiemiento que tuvo en los ultimos 6 meses.
+df_matches %>% 
+  ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
+             color = Result)) + 
+  geom_jitter(width = 1.5) #Cuando llega al match con muchos partidos y con alto win rate hay mas chances de una victoria
+
+df_matches %>% 
+  ggplot(aes(x = RankNadal, y = RankRival,
+             color = Result)) + 
+  geom_jitter() + 
+  coord_cartesian(ylim = c(0, 20),
+                  xlim = c(0, 10)) #Hay mayores posibilidades de derrota si el rival forma parte del top 10
+
+df_matches %>% 
+  ggplot(aes(x = Surface, fill = Result)) + 
+  geom_bar(position = "fill") #Clay es sin dudas las superficie de mayor performance
+
+df_matches %>% 
+  ggplot(aes(x = BestOf, fill = Result)) + 
+  geom_bar(position = "fill") + 
+  facet_grid(.~Surface) #A 5 sets parece rendir mejor Nadal
+
+df_matches %>% 
+  ggplot(aes(x = Round, fill = Result)) + 
+  geom_bar(position = "fill") + 
+  facet_grid(.~Surface) + 
+  theme(axis.text.x = element_text(angle = 45)) #En las primeras rondas el % de victorias en mayor
+
+df_matches %>% 
+  ggplot(aes(x = PartidosUlt6Meses, y = PartidosUlt3Meses)) +
+  geom_jitter() #hay correlacion entre estas dos variables.
+
+df_matches %>% 
+  ggplot(aes(x = PartidosUlt6Meses, y = PartidosUltMes)) +
+  geom_jitter() #Entre estas no tanto
+
+df_matches %>% 
+  ggplot(aes(x = PartidosUlt3Meses, y = PartidosUltMes)) +
+  geom_jitter() #Entre estas algo, menos que para 3 y 6
+```
+
+Obtenemos algunas conclusiones de estos gráficos:
+
+- Cuando Nadal llega con ritmo (cantidad de partidos) y con buen porcentaje de victorias (WR) parece ser más probable que obtenga una victoria en el partido.
+- Si el rival forma parte del top 10, las chances de derrota son mayores.
+- El clay (polvo de ladrillo) es sin dudas la superficie que mejor le sienta.
+- A 5 sets parece haber una mejor performance en general de Nadal.
+- En las primeras rondas del torneo tiende a tener un porcentaje de victorias mayor.
+
+Con esto, claramente, no descubrimos nada nuevo. La intención ahora es utilizar estas conclusiones para modelar la probabilidad de victoria en un partido de Nadal, y en base a ello poder predecir el resultado del partido.
+
+## Tasas de Corte
+
+Vamos a utilizar un modelo logístico para predecir un resultado de un partido de tenis de Nadal. Ahora bien, cuando miremos los resultados de clasificación del modelo, ¿qué tasa de aciertos consideraremos como "buena"?
+Nadal, de por sí, gana la gran mayoría de partidos en los que participa, con lo cual una buena estrategia para "predecir" el resultado del partido parece ser decir que siempre va a ganar Nadal, sin tener en cuenta ninguna variable adicional.
+
+Veamos cuál sería, estadísticamente, nuestra tasa de acierto si nos jugáramos siempre a que gana Nadal.
+
+```{r tasas_corte}
+#Probabilidad histórica de victoria Nadal
+df_matches %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+
+#Si digo que siempre gana, acierto el 83% de las veces.
+
+#Probabilidad ultimos 2 años
+df_matches %>% 
+  filter(Date > ymd("2019-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+
+#Probabilidad 2020 en adelante
+df_matches %>% 
+  filter(Date > ymd("2020-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+
+#Probabilidad post cuarentena
+df_matches %>% 
+  filter(Date > ymd("2020-08-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+
+#Probabilidad 2021
+df_matches %>% 
+  filter(Date > ymd("2020-12-31")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+
+# En definitiva, si yo digo que gana nadal siempre
+# voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
+# O sea un modelo de + de 85% de acierto.
+
+#En clay 2019 en adelante
+df_matches %>% 
+  filter(Date > ymd("2018-12-31") & 
+           Surface == "Clay") %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+
+```
+
+Las tasas históricas de victoria de Rafael Nadal son las siguientes (pueden variar al actualizar la data):
+
+- Histórica: 83.9%
+- Últimos dos años: 84.7%
+- 2020 en adelante: 83,6%
+- Post receso COVID-19: 82%
+- 2021: 85%
+- Clay a partir de 2019: 87.5%
+
+En base a estos números, podemos decir que un modelo predictivo, para que sea realmente útil, debería tener una tasa de acierto esperada superior al 90%.
+Un modelo que acierta el resultado en menos del 85% de los partidos no representa ninguna mejora respecto a la "estrategia" de predicción consistente en decir que siempre gana Nadal.
+
+## Model Train
