@@ -1,12 +1,12 @@
 ---
 title: "Regresión Logística - Aplicación en el Tenis"
 author: "Tomás Roel"
-date: "July 5, 2021"
+date: "July 12, 2021"
 output:
-  html_notebook:
-    theme: paper
   html_document:
     df_print: paged
+  html_notebook:
+    theme: paper
 ---
 
 <style>
@@ -44,24 +44,21 @@ Arrancamos con un setup del environment donde vamos a trabajar.
 
 
 ```{r setup}
-#Cargo librerias de interes
+#Cargo librerías de interés
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
                boot, caret, e1071, readr, correlation, see, ggraph,
                RColorBrewer, ggthemes, psych)
-options(scipen = 999) #Elimino notacion cientifica
-
+options(scipen = 999) #Elimino notación científica
 ```
 
 
-Importamos la base de datos con la que trabajaremos.
+Importamos la base de datos con la que trabajaremos. La misma fue confeccionada a partir de los registros históricos de partidos correspondientes al ATP Men's Tour, publicado por el sitio http://www.tennis-data.co.uk/, a quien agradecemos infinitamente por el aporte.
 
 
 ```{r data_import, warning=FALSE, message=FALSE}
 #importo base desde repositorio en github
 path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
 matches_nadal_ok <- read_csv(url(path))[,-1]
-
-glimpse(matches_nadal_ok) #vistazo a la base
 
 #separo las variables a utilizar
 variables <- c("Location", "Series", "Court", "Surface", "Date",
@@ -73,15 +70,15 @@ variables <- c("Location", "Series", "Court", "Surface", "Date",
                "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
                "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
                "Result")
-
+#Ajusto data types de variables
 df_matches <- matches_nadal_ok %>% 
   select(all_of(variables)) %>% 
   mutate_at(vars(Location, Series, Court, Surface,
                  Round, BestOf, ResultUltPartido, RoundUltPartido, Result),
             as.factor)
-glimpse(df_matches)
-
+glimpse(df_matches) #Vistazo a la base
 ```
+
 Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos valores, "win" o "lose". El resto de las variables aportan información sobre el contexto en el cual se está jugando el partido (superficie, cantidad de sets a disputar, ronda, etc.) y también aportan información sobre la condición previa en que llega cada jugador al partido (ranking, cantidad de partidos jugados, porcentaje de partidos ganados, resultado del último partido, etc.).
 
 
@@ -96,19 +93,17 @@ df_matches %>%
          PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
  print(n = 70)
 
-#Elimino primeras 50 observaciones, a partir de ahi se nivela
+#Elimino primeras 50 observaciones, a partir de ahí se nivela
 df_matches <- df_matches[51:nrow(df_matches),]
-
 ```
-
 
 ## Plots
 
-Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver cómo varía el porcentaje de victorias de Rafel Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
+Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver cómo varía el porcentaje de victorias de Rafael Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
 
 
-```{r plots}
-#Arranco mirando resultado segun el rendiemiento que tuvo en los ultimos 6 meses.
+```{r plots, fig.height=6, fig.width=12}
+#Arranco mirando resultado según el rendimiento que tuvo en los últimos 6 meses.
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
              color = Result)) + 
@@ -117,8 +112,7 @@ df_matches %>%
   labs(x = "Partidos Nadal Últimos 6 Meses",
        y = "Win Rate Nadal Últimos 6 Meses") + 
   theme_few()
-  #Cuando llega al match con muchos partidos y con alto win rate hay mas chances de una victoria
-
+#Miramos ahora la relación entre rankings y resultado del partido
 df_matches %>% 
   ggplot(aes(x = RankNadal, y = RankRival,
              color = Result)) + 
@@ -129,23 +123,23 @@ df_matches %>%
   scale_color_brewer(palette = "Set1") + 
   labs(x = "Ranking Nadal",
        y = "Ranking Rival") + 
-  theme_few()#Hay mayores posibilidades de derrota si el rival forma parte del top 10
-
+  theme_few()
+#Superficie y resultado
 df_matches %>% 
   ggplot(aes(x = Surface, fill = Result)) + 
   geom_bar(position = "fill") +
   scale_fill_brewer(palette = "Set1") + 
   labs(x = "Surface") + 
-  theme_few()#Clay es sin dudas las superficie de mayor performance
-
+  theme_few()
+#Longitud del partido
 df_matches %>% 
   ggplot(aes(x = BestOf, fill = Result)) + 
   geom_bar(position = "fill") + 
   facet_grid(.~Surface) +
   scale_fill_brewer(palette = "Set1") + 
   labs(x = "Best Of") + 
-  theme_few()#A 5 sets parece rendir mejor Nadal
-
+  theme_few()
+#Ronda y superficie
 df_matches %>% 
   ggplot(aes(x = Round, fill = Result)) + 
   geom_bar(position = "fill") + 
@@ -157,31 +151,31 @@ df_matches %>%
   theme(axis.text.x = element_text(angle = 45,
                                    size = 6,
                                    vjust = 1,
-                                   hjust = 1)) #En las primeras rondas el % de victorias en mayor
-
+                                   hjust = 1))
+#Relación entre resultados de últimos 3 y 6 meses
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = PartidosUlt3Meses)) +
   geom_jitter() +
   scale_color_brewer(palette = "Set1") + 
   labs(x = "Partidos Nadal Últimos 6 Meses",
        y = "Partidos Nadal Últimos 3 Meses") + 
-  theme_few()#hay correlacion entre estas dos variables.
-
+  theme_few()
+#Relación entre partidos de últimos 3 y 6 meses
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = PartidosUltMes)) +
   geom_jitter() +
   scale_color_brewer(palette = "Set1") + 
   labs(x = "Partidos Nadal Últimos 6 Meses",
        y = "Partidos Nadal Último Mes") + 
-  theme_few()#Entre estas no tanto
-
+  theme_few()
+#Relación entre partidos del último mes 3 meses
 df_matches %>% 
   ggplot(aes(x = PartidosUlt3Meses, y = PartidosUltMes)) +
   geom_jitter() +
   scale_color_brewer(palette = "Set1") + 
   labs(x = "Partidos Nadal Últimos 3 Meses",
        y = "Partidos Nadal Último Mes") + 
-  theme_few()#Entre estas algo, menos que para 3 y 6
+  theme_few()
 ```
 
 Obtenemos algunas conclusiones de estos gráficos:
@@ -201,19 +195,17 @@ Con la base de datos disponible, calculamos las correlaciones entre cada una de 
 
 
 ```{r correlations, message=FALSE, warning=FALSE}
-
+#Matriz de correlaciones en forma de lista y ordenada
 correlation(df_matches[,c(3:4,6:28)] %>% 
               filter(!is.na(SetsPerdidosUltPartido) & !is.na(RoundUltPartido)),
             include_factors = TRUE,
             method = "auto") %>% 
   as_tibble() %>% 
   arrange(desc(r))
-  
-
 ```
 Las variables con una alta correlación (ya sea positiva o negativa) no deberían ser utilizadas de forma conjunta como predictoras en un modelo de regresión ya que afectan de forma negativa el resultado del mismo.
 
-Analizando la tabla de correlaciones podemos sacar conclusiones que en principio pueden parecer triviales, por ejemplo que hay una alta correlación entre la variable 'Round' y la variable 'RoundUltPartido'. También podemos obtener otras conclusiones más importantes, como por ejemplo que existe una alta correlación positiva ente el win rate de los últimos 6 y 3 meses, tanto para los rivales como para Nadal. Lo mismo pasa entre el win rate de los últimos 3 meses y el del último mes.
+Analizando la tabla de correlaciones podemos sacar conclusiones que en principio pueden parecer triviales, como por ejemplo, que hay una alta correlación entre la variable 'Round' y la variable 'RoundUltPartido'. También podemos obtener otras conclusiones más importantes, como por ejemplo que existe una alta correlación positiva ente el win rate de los últimos 6 y 3 meses, tanto para los rivales como para Nadal. Lo mismo pasa entre el win rate de los últimos 3 meses y el del último mes.
 
 A la hora de elegir combinaciones de predictoras tendremos entonces que prestar atención a estos resultados e intentar combinar variables con poca correlación, como pueden ser la variable win rate del último mes con la variable win rate de los últimos 6 meses.
 
@@ -226,64 +218,57 @@ Veamos cuál sería, estadísticamente, nuestra tasa de acierto si nos jugáramo
 
 ```{r tasas_corte}
 #Probabilidad histórica de victoria Nadal
-df_matches %>% 
+tasa_historica <- df_matches %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
-#Si digo que siempre gana, acierto el 83% de las veces.
-
-#Probabilidad ultimos 2 años
-df_matches %>% 
+tasa_historica
+#Probabilidad a partir de 2019
+tasa_2019 <- df_matches %>% 
   filter(Date > ymd("2019-01-01")) %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
+tasa_2019
 #Probabilidad 2020 en adelante
-df_matches %>% 
+tasa_2020 <- df_matches %>% 
   filter(Date > ymd("2020-01-01")) %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
+tasa_2020
 #Probabilidad post cuarentena
-df_matches %>% 
+tasa_postReceso <- df_matches %>% 
   filter(Date > ymd("2020-08-01")) %>% 
   pull(Result) %>% 
   table() %>% 
-  prop.table() 
-
+  prop.table()
+tasa_postReceso
 #Probabilidad 2021
-df_matches %>% 
+tasa_post2021 <- df_matches %>% 
   filter(Date > ymd("2020-12-31")) %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
-# En definitiva, si yo digo que gana nadal siempre
-# voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
-# O sea un modelo de + de 85% de acierto.
-
+tasa_post2021
 #En clay 2019 en adelante
-df_matches %>% 
+tasa_clay <- df_matches %>% 
   filter(Date > ymd("2018-12-31") & 
            Surface == "Clay") %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
+tasa_clay
 ```
 
+Las tasas históricas de victoria de Rafael Nadal son las siguientes:
 
-Las tasas históricas de victoria de Rafael Nadal son las siguientes (pueden variar al actualizar la data):
-
-- Histórica: 83.9%
-- Últimos dos años: 84.7%
-- 2020 en adelante: 83,6%
-- Post receso COVID-19: 82%
-- 2021: 85%
-- Clay a partir de 2019: 87.5%
+- Histórica: `r round(tasa_historica[2]*100,2)`%
+- A partir de 2019: `r round(tasa_2019[2]*100,2)`%
+- 2020 en adelante: `r round(tasa_2020[2]*100,2)`%
+- Post receso COVID-19: `r round(tasa_postReceso[2]*100,2)`%
+- 2021: `r round(tasa_post2021[2]*100,2)`%
+- Clay a partir de 2019: `r round(tasa_clay[2]*100,2)`%
 
 En base a estos números, podemos decir que un modelo predictivo, para que sea realmente útil, debería tener una tasa de acierto esperada superior al 90%.
 Un modelo que acierta el resultado en menos del 85% de los partidos no representa ninguna mejora respecto a la "estrategia" de predicción consistente en decir que siempre gana Nadal.
@@ -297,23 +282,21 @@ Como primer paso, vamos a ajustar un modelo con todas las covariables disponible
 
 ### Estrategia de Entrenamiento-Testeo
 
-Como estrategia de entrenamiento y testeo, entrenamos utilizando *k-fold cross validation* para obtener una medida del error que no esté sesgada por los datos. Este entrenamiento se realizará solo con los partidos previos a abril 2020 (inicio de la pandemia COVID-19). Los partidos post receso por pandemia serán utilizados como base de testeo, donde se analizará de forma más precisa la performance predictiva del modelo.
+Como estrategia de entrenamiento y testeo, entrenamos utilizando *m-repeated k-fold cross validation* para obtener una medida del error que no esté sesgada por los datos. Este entrenamiento se realizará solo con los partidos previos a abril 2020 (inicio de la pandemia COVID-19). Los partidos post receso por pandemia serán utilizados como base de testeo, donde se analizará de forma más precisa la performance predictiva del modelo.
 
 ### Modelo 0: prueba de covariables
 
-En el primer modelo ajustado - modelo 0 - se utilizan todos los features disponibles para modelar el resultado del partido. De este análisis se desprenderán indicios sobre cuáles covariables pueden tener una fuerte relación con el resultado del partido.
+En el primer modelo ajustado - modelo 0 - se utilizarán todos los features disponibles para modelar el resultado del partido. De este análisis se desprenderán indicios sobre cuáles covariables pueden tener una fuerte relación con el resultado del partido.
 
 
-```{r prueba_covariables, warning=FALSE, message=FALSE}
+```{r prueba_covariables, warning=FALSE, message=FALSE, fig.height=6, fig.width=12}
 #Separo partidos post receso. Sera mi base test
 df_matches_train <- df_matches %>% 
   filter(Date < "2020-04-01")
 df_matches_test <- df_matches %>% 
   filter(Date >= "2020-04-01")
-
 #Defino el trainControl, aplicable solo a este modelo.
 trainControlfit0 <- trainControl(method = "cv", number = 10)
-
 #Modelo 0 - prueba de covariables. No uso todas las variables, algunas no nos interesan
 glm.fit0 <- train(Result ~ Court + Surface + Round + BestOf + RankNadal +
                     RankRival + PartidosUlt6Meses + PartidosUlt3Meses +
@@ -328,12 +311,26 @@ glm.fit0 <- train(Result ~ Court + Surface + Round + BestOf + RankNadal +
                   method = "glm",
                   family = "binomial",
                   na.action = na.omit)
-
 #Vemos el objeto que obtenemos
-glm.fit0 #se puede observar que el accuracy, utilizando CV, es de 0.94.
-
-#Ahora veamos un resumen del modelo y sus coeficientes
-summary(glm.fit0)
+glm.fit0 
+#Armamos un gráfico para ver cuales son las variables más significativas en términos de p-valor
+glm.fit0 %>% 
+  summary() %>% 
+  coef() %>% 
+  as_tibble() %>% 
+  cbind(Variable = glm.fit0 %>% 
+          summary() %>% 
+          coef() %>% rownames(),.) %>% 
+  mutate(`Pr(>|z|)` = round(`Pr(>|z|)`, 6)) %>% 
+  ggplot(aes(x = reorder(Variable, `Pr(>|z|)`), y = `Pr(>|z|)`)) + 
+  geom_bar(stat = "identity", fill = brewer.pal(n = 5, "Set1")[2]) + 
+  labs(x = "",
+       y = "P Value") +
+  theme_few() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   size = 10,
+                                   vjust = 1,
+                                   hjust = 1))
 ```
 
 Mirando los p-value de los coeficientes del modelo podemos ver que hay algunas variables que tienen un impacto significativo en el resultado del partido. Éstas son:
@@ -361,7 +358,6 @@ Ahora, ajustaremos una serie de modelos, buscando el de mejor performance predic
 Para determinar cuál es el mejor modelo, compararemos la métrica de error obtenida del entrenamiento vía cross validation. También utilizaremos el dataset de testeo para valuar performance en éste.
 La tasa de corte para clasificar los partidos en "win" o "lose" será del 80%. Es decir, si la probabilidad de victoria predicha por el modelo para un partido es del 80% o más, ese partido será clasificado como "win". Si es menor, el resultado predicho será de "lose".
 
-
 ```{r model_train, warning=FALSE, message=FALSE}
 #Armo un listado con todos los modelos que voy a ajustar y sus formulas
 vars <- list(model1 = "Round + PartidosUlt6Meses + PartidosUlt3Meses + PartidosUltMes + WRUlt6Meses + WRUlt3Meses + WRUltMes + PartidosRivalUltMes + WRRivalUltMes + ResultUltPartido",
@@ -370,7 +366,6 @@ vars <- list(model1 = "Round + PartidosUlt6Meses + PartidosUlt3Meses + PartidosU
              model4 = "Surface + BestOf + RankNadal + RankRival + Round + PartidosUltMes + WRUltMes + PartidosRivalUltMes + WRRivalUltMes",
              model5 = "Surface + PartidosUltMes + WRUltMes + PartidosUlt6Meses + WRUlt6Meses + PartidosRivalUltMes + WRRivalUltMes + ResultUltPartido + RoundUltPartido",
              model6 = "RankNadal + RankRival + Round + PartidosUltMes + WRUltMes + PartidosRivalUltMes + WRRivalUltMes")
-
 #Armo una tabla donde se almacenan los resultados de los ajustes
 results <- tibble(modelo = paste("glm.fit", 1:6, sep = ""),
                   cv.accuracy = rep(0, 6),
@@ -378,13 +373,10 @@ results <- tibble(modelo = paste("glm.fit", 1:6, sep = ""),
                   FP.Ratio.test = rep(0, 6))
 #Defino el train control. Sera repeated CV, con 10 particiones y 10 repeticiones
 trainControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-
 #Seteo semilla para que los resultados sean reproducibles
 set.seed(1200)
-
 #Defino la tasa de corte para el testeo
 r <- 0.8
-
 for (i in (1:nrow(results))) {
   
   formula <- as.formula(paste("Result ~ ", paste(vars[i]), sep = ""))
@@ -415,7 +407,6 @@ for (i in (1:nrow(results))) {
 }
 
 results
-
 ```
 
 Esta tabla resume, para cada modelo, la siguiente información:
@@ -428,9 +419,70 @@ El false-positive ratio es muy importante en este análisis ya que los partidos 
 
 ### Selección del Modelo
 
-Basándonos exclusivamente en el error calculado por el método de cross validation podemos concluir que todos los modelos tienen un rendimiento similar, y éste es en general muy bueno. Vamos a seleccionar el modelo número 3, que es el que tiene el mayor accuracy. Los modelos 2 y 3 tienen una composición de variables muy similar.
-En el modelo seleccionado se puede observar una accuracy muy alta tanto por CV como en la base de testeo post receso. El false-ratio test es muy alto, pero podremos bajarlo ajustando la tasa de corte o umbral de clasificación.
+Basándonos exclusivamente en el error calculado por el método de cross-validation podemos concluir que todos los modelos tienen un rendimiento similar, y éste es en general muy bueno. Vamos a seleccionar el modelo número 3, que es el que tiene el mayor accuracy. Los modelos 2 y 3 tienen una composición de variables muy similar.
 
+Veamos un resumen de este modelo:
+
+```{r glm_selected}
+#Resumen del modelo
+summary(glm.fit3)
+```
+
+Se observa que hay variables que no son significativas, como por ejemplo el ranking de los jugadores y el win rate de los últimos 3 meses de Nadal (poseen un p-value alto).
+
+Vamos a sacar esas variables y analizar otra vez el accuracy del modelo.
+
+```{r tunning, message=FALSE, warning=FALSE}
+#Nuevo ajuste eliminando variables con poco impacto en glm.fit3
+glm.fit3.1 <- train(Result ~ Surface + BestOf + Round + 
+                      PartidosUltMes +WRUltMes + PartidosRivalUltMes +
+                      WRRivalUltMes + ResultUltPartido,
+                    data = df_matches_train,
+                    trControl = trainControl,
+                    method = "glm",
+                    family = "binomial",
+                    na.action = na.omit)
+glm.fit3.1
+```
+
+Vemos que con este nuevo ajuste mejoramos el accuracy con respecto al modelo `glm.fit3`, con lo cual este será nuestro modelo final.
+Veamos cómo impactan las variables seleccionadas en la probabilidad de victoria de Nadal.
+
+```{r glm.fit.3.1, fig.height=6, fig.width=12}
+#Armamos un gráfico para ver cuales son las variables más significativas en términos de p-valor
+tabl_glm3.1 <- glm.fit3.1 %>% 
+  summary() %>% 
+  coef() %>% 
+  as_tibble() %>% 
+  cbind(Variable = glm.fit3.1 %>% 
+          summary() %>% 
+          coef() %>% rownames(),.) %>% 
+  mutate(Estimate = round(Estimate, 3),
+         pos = Estimate >= 0)
+#Gráfico
+tabl_glm3.1 %>% 
+  ggplot(aes(x = reorder(Variable, -abs(Estimate)), y = Estimate, fill = pos)) +
+  geom_col(position = "identity") +
+  geom_text(aes(label = Estimate, vjust = -sign(Estimate))) +
+  labs(x = "",
+       y = "Beta Estimado") +
+  coord_cartesian(ylim = c(-30,30))+
+  theme_few() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   size = 10,
+                                   vjust = 1,
+                                   hjust = 1),
+        legend.position = "none")
+```
+
+Se puede ver que las variables que tienen mayor impacto en la estimación de la probabilidad de victoria para cada partido son el win rate del rival en el último mes, el cual afecta negativamente la probabilidad de victoria, y el win rate de Nadal en el último mes, que afecta positivamente a la probabilidad de victoria.
+Esto es lógico, ya que un mayor porcentaje de victorias de Nadal en el último mes significa que llega al partido con una buena performance en los partidos previos, por lo que sus chances de victoria se incrementan. Exactamente lo opuesto sucede cuando el rival llega con un alto porcentaje de victorias.
+
+Otro caso interesante es lo que sucede con la cantidad de partidos jugados en el último mes, tanto para Nadal como para el rival. Esta variable tiene el efecto opuesto a la de variable win rate, y es un tanto polémico. El modelo parece penalizar la probabilidad de victoria cuando el tenista (aplica tanto Nadal como el rival) viene con muchos partidos jugados en el último mes. Intuitivamente, lo que el modelo parece estar captando es que si el jugador llega con muchos partidos en el mes su probabilidad de victoria decae debido al cansancio acumulado.
+
+Otra conclusión bastante obvia que se desprende del análisis es que si el partido se disputa sobre cancha lenta la probabilidad de victoria de Nadal crece, lo mismo sucede si el partido es al mejor de 5 sets.
+
+En lo que respecta a los resultados predictivos del modelo, el mismo tiene una tasa de clasificación estimada por CV de más del 95%. Ahora bien, para obtener los mejores resultados predictivos debemos determinar el umbral de clasificación óptimo, es decir la probabilidad a partir de la cual vamos a clasificar un partido como victoria o derrota.
 
 ## Umbral de Clasificación
 
@@ -444,8 +496,7 @@ El umbral óptimo de clasificación será el que nos deje con un alto TPR y un b
 
 ```{r curva_ROC}
 #Computo probabilidades utilizando el modelo seleccioado
-probs <- predict(glm.fit3, type = "prob", newdata = df_matches_test)$Win
-
+probs <- predict(glm.fit3.1, type = "prob", newdata = df_matches_test)$Win
 #Armo factores para curva ROC
 ROC_curve <- tibble(
   Umbral = rep(0, 39),
@@ -474,10 +525,9 @@ ROC_curve %<>%
   mutate(TPR = TP/(TP+FN),
          FPR = FP/(FP+TN))
 ROC_curve
-
 ```
 
-Observando la evolución del TPR y el FPR, podemos concluir que un umbral de clasificación razonable y óptimo parece ser 0.925.
+Observando la evolución del TPR y el FPR, podemos concluir que un umbral de clasificación razonable y óptimo parece ser 0.925. Priorizamos bajar el FPR al mínimo ya que es de nuestro interés poder identificar aquellos partidos donde Nadal pierde, partidos que claramente son los menos.
 
 
 # Resultados Finales
@@ -490,17 +540,14 @@ corte <- 0.925
 pred <- rep("Lose", nrow(df_matches_test))
 pred[probs > corte] = "Win"
 table(pred, real = df_matches_test$Result)
-
-
 ```
 
-Se observa que hay solo un partido que queda mal clasificado, al tener Nadal una alta probabilidad de victoria. Veamos de qué partido se trata.
+Se observa que hay solo un partido donde Nadal no ganó que queda mal clasificado, partido en el que Nadal tenía una alta probabilidad de victoria y sin embargo perdió. Veamos de qué partido se trata.
 
 ```{r outlier}
-#identifico partido mal clasificado
+#identifico partido perdido mal clasificado
 cual <- which(pred != df_matches_test$Result)
-df_matches_test[cual,]
-
+df_matches_test[cual,] %>% filter(Result == "Lose")
 ```
 
 El partido en cuestión corresponde a los cuartos de final del Masters 1000 de Roma, donde Rafael Nadal cayó ante Diego Schwartzman. Sin dudas se trató de una derrota inesperada, ya que la superficie y el ranking jugaban a favor de Nadal. El porcentaje de victorias de Schwartzman en los últimos 3 meses tampoco era demasiado bueno.
