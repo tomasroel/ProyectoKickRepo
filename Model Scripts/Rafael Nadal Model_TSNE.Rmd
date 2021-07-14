@@ -1,0 +1,89 @@
+---
+title: "TSNE - Aplicación en el Tenis"
+output: html_notebook
+---
+
+Aplicación de la técnica TSNE de reducción de dimensionalidad sobre una base de partidos de tenis de Rafael Nadal.
+
+```{r setup}
+#Cargo librerías de interés
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate, readr,
+               RColorBrewer, rgl, keras, tensorflow, caret, cluster, Rtsne)
+options(scipen = 999) #Elimino notación científica
+#importo base desde repositorio en github
+path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
+matches_nadal_ok <- read_csv(url(path))[,-1]
+
+#separo las variables a utilizar
+variables <- c("Location", "Series", "Court", "Surface", "Date",
+               "Round", "BestOf", "RankNadal", "RankRival",
+               "PartidosUlt6Meses", "PartidosUlt3Meses", "PartidosUltMes",
+               "WRUlt6Meses", "WRUlt3Meses", "WRUltMes",
+               "PartidosRivalUlt6Meses", "PartidosRivalUlt3Meses",
+               "PartidosRivalUltMes", "WRRivalUlt6Meses", "WRRivalUlt3Meses",
+               "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
+               "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
+               "Result")
+#Ajusto data types de variables
+df_matches <- matches_nadal_ok %>% 
+  select(all_of(variables)) %>% 
+  mutate_at(vars(Location, Series, Court, Surface,
+                 Round, BestOf, ResultUltPartido, RoundUltPartido, Result),
+            as.factor)
+rm(matches_nadal_ok, path, variables)
+glimpse(df_matches) #Vistazo a la base
+```
+
+# Data Wrangling
+
+Limpio el dataset de NA's y de las primeras observaciones.
+
+```{r data_wrangling}
+#Seleccionamos variables que son de interés a nuestro problema
+df_matches <- df_matches[,-c(1,2,5)]
+#Corrijo el dataset inicial
+df_matches <- df_matches[51:nrow(df_matches),]
+df_matches <- df_matches[-which(is.na(df_matches[,19])),]
+```
+
+# TSNE
+
+Primero calculo una matriz de distancias custom usando la distancia gower (mezcla, porque tengo variables continuas y categoricas).
+Luego aplico TSNE y ploteo.
+
+```{r TSNE}
+#Calculo matriz de distancias
+gower_dist <- daisy(df_matches[,-25],
+                    metric = "gower",
+                    type = list(logratio = 3))
+summary(gower_dist)
+
+
+gower_mat <- as.matrix(gower_dist)
+#Veo la más disimil
+df_matches[which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]),
+        arr.ind = TRUE)[1, ], ] #Vemos con son muy distintas
+
+#Calculo coordenadas con tsne
+tsne_obj <- Rtsne(gower_dist, is_distance = TRUE, dims = 3)
+#Default perplexity is 0.5
+
+tsne_data <- tsne_obj$Y %>% 
+  as_tibble %>% 
+  mutate(Result = df_matches %>% pull(Result)) %>% 
+  mutate(Result = recode(Result, "1" = "Win", "0" = "Lose"))
+
+#Colores
+color <- rep("green", nrow(df_matches))
+color[which(df_matches[,25]=="Lose")] = "red"
+
+#Ploteo 3D
+open3d()
+plot3d(tsne_data[1:3], col = color)
+legend3d("topright", legend = c("Win", "Lose"),
+         pch = 16, col = c("green", "red"),
+         cex = 1, inset = c(0.02))
+
+
+```
+
