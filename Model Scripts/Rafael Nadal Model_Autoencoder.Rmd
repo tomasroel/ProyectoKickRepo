@@ -1,0 +1,157 @@
+---
+title: "R Notebook"
+author: "Tomás Roel"
+date: "July 13, 2020"
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    theme: paper
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+
+# Introducción
+
+En el presente trabajo aplicaremos una téncnica de reducción de dimensionalidad denominada Autoencoder. Está técnica pretende reducir la dimensionalidad de un dataset con el objetivo de poder plotear las observaciones e identificar outliers.
+
+El método se basa en la utilización de redes neuronales. Para más información y detalles acerca del funcionamiento del método recomiendo esta serie de videos *https://www.youtube.com/playlist?list=PLN2e9R_DoC0R9oje8ug8sk_Pab9Q0ZDHk* de Andrés Farall, profesor de la Facultad de Ciencias Exactas y Naturales de la Universidad de Buenos Aires.
+
+# Desarrollo
+
+Comenzamos ahora el paso a paso para aplicar la técnica de Autoencoder. Nuestro dataset consta de más de 1000 partidos de tenis de Rafael Nadal, con más de 25 variables que describen el contexto en el cual se juega el partido. El objetivo es plotear esos partidos en un gráfico 3D e identificarlos según su resultado final.
+
+## Setup del Environment y Data Import
+
+```{r setup}
+#Cargo librerías de interés
+pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate, readr,
+               RColorBrewer, rgl, keras, tensorflow, caret, cluster, Rtsne)
+options(scipen = 999) #Elimino notación científica
+#importo base desde repositorio en github
+path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
+matches_nadal_ok <- read_csv(url(path))[,-1]
+
+#separo las variables a utilizar
+variables <- c("Location", "Series", "Court", "Surface", "Date",
+               "Round", "BestOf", "RankNadal", "RankRival",
+               "PartidosUlt6Meses", "PartidosUlt3Meses", "PartidosUltMes",
+               "WRUlt6Meses", "WRUlt3Meses", "WRUltMes",
+               "PartidosRivalUlt6Meses", "PartidosRivalUlt3Meses",
+               "PartidosRivalUltMes", "WRRivalUlt6Meses", "WRRivalUlt3Meses",
+               "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
+               "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
+               "Result")
+#Ajusto data types de variables
+df_matches <- matches_nadal_ok %>% 
+  select(all_of(variables)) %>% 
+  mutate_at(vars(Location, Series, Court, Surface,
+                 Round, BestOf, ResultUltPartido, RoundUltPartido, Result),
+            as.factor)
+rm(matches_nadal_ok, path, variables)
+glimpse(df_matches) #Vistazo a la base
+```
+
+## Transformación en Matriz
+
+Para utilizar Autoencoders necesitamos contar con un dataset en forma de matriz y con valores numéricos normalizados.
+
+```{r matriz}
+#Seleccionamos variables que son de interés a nuestro problema
+df_matches <- df_matches[,-c(1,2,5)]
+#Transformamos Result y ResultUltPartido en variables numericas
+df_matches %<>% 
+  mutate(ResultUltPartido = recode(ResultUltPartido, "Win" = 1, "Lose" = 0),
+         Result = recode(Result, "Win" = 1, "Lose" = 0))
+glimpse(df_matches)
+#Ahora transformo todas las variables categoricas en numericas
+dummy <- dummyVars("~.", data = df_matches)
+mtrx_matches <- as_tibble(predict(dummy, newdata = df_matches))
+mtrx_matches <- as.matrix(mtrx_matches)
+#Normalizo variables numericas
+prepoc1 <- preProcess(mtrx_matches[,c(17:32,42:43)], method = c("range"))
+norm1 <- predict(prepoc1, mtrx_matches[,c(17:32,42:43)])
+summary(norm1)
+
+mtrx_matches <- cbind(norm1, mtrx_matches[,-c(17:32,42:43)])
+#Elimino primeras 50 observaciones porque no son fehacientes
+mtrx_matches <- mtrx_matches[51:nrow(mtrx_matches),]
+summary(mtrx_matches)
+#En Sets Perdidos Ult partido y Sets ganados tengo varios NA, por ahora los elimino pero no es lo correcto.
+#Corresponde a partidos en donde nadal ganó o perdió por WO.
+mtrx_matches <- mtrx_matches[-which(is.na(mtrx_matches[,16])),]
+summary(mtrx_matches)
+rm(norm1, dummy, prepoc1)
+```
+
+# Aplicación Autoencoder
+
+Ya contamos con nuestra data en forma matricial y normalizada, sin valores faltantes. Vamos a aplicar el Autoencoder para reducir la dimensionalidad del dataset. Buscaremos pasar de una dimensión 43 (no incluimos el resultado del partido) a una dimensión 3.
+
+```{r autoencoder}
+#defino el x_train
+x_train <- mtrx_matches[,-44]
+#Defino el input_size y el latent size, o sea la dimensión a la que quiero comprimir
+input_size <- dim(x_train)[2]
+latent_size <- 3
+#En primer lugar, escribo el encoder. La parte de la red que comprime la información
+enc_input <- layer_input(shape = input_size)
+enc_output <- enc_input %>% 
+  layer_dense(units=25, activation = "relu") %>% 
+  layer_dense(units=latent_size)
+
+encoder <-  keras_model(enc_input, enc_output)
+summary(encoder)
+
+#Ahora escribimos el decoder. La parte de la red que descomprime la información
+dec_input <-  layer_input(shape = latent_size)
+dec_output <-  dec_input %>% 
+  layer_dense(units=25, activation = "relu") %>% 
+  layer_dense(units = input_size, activation = "sigmoid")
+
+decoder <-  keras_model(dec_input, dec_output)
+ 
+summary(decoder)
+
+#Ahora junto encoder y decoder para formar el autoencoder
+aen_input <-  layer_input(shape = input_size)
+aen_output <-  aen_input %>% 
+  encoder() %>% 
+  decoder()
+   
+aen <-  keras_model(aen_input, aen_output)
+summary(aen)
+
+#Por último, entreno la red
+aen %>%
+  compile(optimizer="adam",
+          loss="mean_squared_error")
+
+aen %>%
+  fit(x_train,
+      x_train,
+      epochs=200,
+      batch_size=10)
+
+#Predecimos sobre el datset de train con el encorder
+pred <- predict(encoder, x_train)
+#Ahora armamos dataset y ploteamos
+df_aen <- pred %>% 
+  as_tibble() %>% 
+  cbind(Result = mtrx_matches[,44])
+
+color <- rep("green", nrow(df_aen))
+color[which(df_aen[,4]==0)] = "red"
+#Ploteo 3D
+open3d()
+plot3d(df_aen[1:3], col = color)
+legend3d("topright", legend = c("Win", "Lose"),
+         pch = 16, col = c("green", "red"),
+         cex = 1, inset = c(0.02))
+```
+
+
