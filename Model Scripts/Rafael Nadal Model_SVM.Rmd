@@ -164,7 +164,7 @@ Con esto, claramente, no descubrimos nada nuevo. La intención ahora es utilizar
 
 Antes de comenzar con el ajuste de los modelos, sería interesante poder ver a las observaciones en un gráfico tridimensional. Obviamente, al estar trabajando en un espacio muy grande (tenemos 24 covariables) no podemos graficarlas usando toda la información disponible, sino que tenemos que usar una técnica de reducción de dimensionalidad.
 
-La técnica a utilizar será **t-Distributed Stochastic Neighbor Embedding (T-SNE)**. Está metodología logra aproximar las observaciones que viven en un espacio muy grande en uno mucho más pequeño que permite graficarlas (2 o 3 dimensiones).
+La técnica a utilizar será **t-Distributed Stochastic Neighbor Embedding (T-SNE)**. Esta metodología logra aproximar las observaciones que viven en un espacio muy grande en uno mucho más pequeño que permite graficarlas (2 o 3 dimensiones).
 Para más información sobre el tema recomiendo ver los videos que Andrés Farall tiene publicados acerca del mismo: https://www.youtube.com/playlist?list=PLN2e9R_DoC0TjZtHGm8-PFifxzE9KwilZ.
 
 T-SNE requiere del cálculo de distancias entre observaciones para hacer la reducción de dimensionalidad. Si las variables son continuas, generalmente se utiliza la distancia euclídea, pero si son categóricas tendremos que usar otra fórmula de cálculo. En nuestro caso, poseemos un mix de variables continuas y categóricas, con lo cual utilizaremos la distancia Gower.
@@ -200,7 +200,7 @@ plot3d(tsne_data[1:3], col = color)
 rglwidget()
 ```
 
-En el gráfico tridimensional podemos ver la representación en baja dimensión que obtenemos mediante la aplicación de T-SNE. Las observaciones rojas representan los partidos perdidos por Nadal, mientras que las verdes representan los ganados. Se puede ver que hay zonas donde predominan los rojos, zonas que vamos a intentar identificar mediante la aplicación de SVM.
+En el gráfico tridimensional podemos ver la representación en baja dimensión que obtenemos mediante la aplicación de T-SNE. Las observaciones rojas representan los partidos perdidos por Nadal, mientras que las verdes representan los ganados. Se puede ver que hay zonas con mayor cantidad de rojos, zonas que vamos a intentar identificar mediante la aplicación de SVM.
 
 
 ## Tasas de Corte
