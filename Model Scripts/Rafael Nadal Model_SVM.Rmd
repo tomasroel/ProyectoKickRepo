@@ -1,9 +1,11 @@
 ---
-title: "Support Vector Machines - Aplicación en el Tenis"
+title: "Support Vector Machine - Aplicación en el Tenis"
 author: "Tomás Roel"
 date: "July 20, 2021"
-output: 
-  html_notebook: 
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
     theme: paper
 ---
 
@@ -18,9 +20,9 @@ Este documento es una continuación del primer trabajo realizado acerca clasific
 
 Repasando el problema, el mismo consiste en utilizar un set de variables acerca del contexto del partido y de la condición en que cada uno de los tenistas llega a disputar el encuentro para predecir quién será el ganador del mismo.
 
-### Support Vector Machines
+### Support Vector Machine
 
-En esta ocasión, probaremos un modelo un tanto más complejo que el modelo de Regresión Logística. Trabajaremos con Support Vector Machines, un método muy flexible, utilizado principalmente para problemas de clasificación binaria y que en general tiene muy buena performance en problemas complejos.
+En esta ocasión, probaremos un modelo un tanto más complejo que el modelo de Regresión Logística. Trabajaremos con Support Vector Machine, un método muy flexible, utilizado principalmente para problemas de clasificación binaria y que en general tiene muy buena performance en problemas complejos.
 
 No ahondaremos en una descripción detallada del método ya que existe vasta literatura acerca del mismo. Solo diremos que lo que el método intenta buscar para separar las clases (victoria y derrota, "win" y "lose" en nuestro problema) es el mejor hiperplano separador que exista, entendiendo por hiperplano separador aquel que deje el mayor margen posible entre las clases.
 Ahora bien, si este método separa con un hiperplano, para obtener un buen resultado necesitaríamos aplicarlo a clases que sean linealmente separables. De ser así, esto sería una gran limitación para el método ya que son pocos los problemas que cuentan con estas características. Afortunadamente, Support Vector Machines logra superar este inconveniente utilizando una técnica que se conoce como *kernel trick* y es la clave de por qué este método es tan potente.
@@ -28,17 +30,18 @@ Esencialmente, el *kernel trick* consiste en aplicar una transformación a las o
 
 # Desarrollo
 
-En las próximas secciones iremos desarrollando, paso a paso, la aplicación de Support Vector Machines (SVM de ahora en más) a nuestro problema de clasificación. Todo el trabajo ha sido realizado usando R como herramienta principal.
+En las próximas secciones iremos desarrollando, paso a paso, la aplicación de Support Vector Machine (SVM de ahora en más) a nuestro problema de clasificación. Todo el trabajo ha sido realizado usando R como herramienta principal.
 
-### Setup
+## Setup
 
 Arrancamos con un setup del environment donde vamos a trabajar.
 
 ```{r setup}
 #Cargo librerias de interes
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
-               boot, caret, e1071, readr)
+               RColorBrewer, caret, e1071, readr, rgl, cluster, Rtsne, ggthemes)
 options(scipen = 999) #Elimino notacion cientifica
+options(rgl.useNULL = TRUE)
 ```
 
 Importamos la base de datos con la que trabajaremos.
@@ -47,8 +50,6 @@ Importamos la base de datos con la que trabajaremos.
 #importo base desde repositorio en github
 path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
 matches_nadal_ok <- read_csv(url(path))[,-1]
-
-glimpse(matches_nadal_ok) #vistazo a la base
 
 #separo las variables a utilizar
 variables <- c("Location", "Series", "Court", "Surface", "Date",
@@ -60,10 +61,14 @@ variables <- c("Location", "Series", "Court", "Surface", "Date",
                "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
                "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
                "Result")
-
+#Ajusto data types de variables
 df_matches <- matches_nadal_ok %>% 
-  select(all_of(variables))
-glimpse(df_matches)
+  select(all_of(variables)) %>% 
+  mutate_at(vars(Location, Series, Court, Surface,
+                 Round, BestOf, ResultUltPartido, RoundUltPartido, Result),
+            as.factor)
+rm(matches_nadal_ok, path, variables)
+glimpse(df_matches) #Vistazo a la base
 
 ```
 
@@ -72,64 +77,76 @@ Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos va
 ## Data Wrangling
 
 Con la base ya cargada, hacemos unos ajustes necesarios previos al análisis.
+SVM necesita como input una matriz numérica, con lo cual debemos transformar todas las variables categóricas haciendo un *one hot encoding*¨. Otro ajuste que haremos a la base será estandarizar todas las variables numéricas para que tomen valores entre 0 y 1. Esto lo haremos como un pre-procesamiento antes del ajuste del modelo.
 
 
 ```{r data_wrangling}
+#Elimino variables que no son de interes
+df_matches <- df_matches[,-c(1,2)]
 #Elimino observaciones que no me sirven porque no tengo registro de los partidos anteriores
 df_matches %>%
-  select(Location, RankNadal,
-         PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
+  select(RankNadal,PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
  print(n = 70)
 
 #Elimino primeras 50 observaciones, a partir de ahi se nivela
 df_matches <- df_matches[51:nrow(df_matches),]
-
 ```
 
 ## Plots
 
 Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver cómo varía el porcentaje de victorias de Rafel Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
 
-```{r plots}
-#Arranco mirando resultado segun el rendiemiento que tuvo en los ultimos 6 meses.
+```{r plots, fig.height=6, fig.width=12}
+#Arranco mirando resultado según el rendimiento que tuvo en los últimos 6 meses.
 df_matches %>% 
   ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
              color = Result)) + 
-  geom_jitter(width = 1.5) #Cuando llega al match con muchos partidos y con alto win rate hay mas chances de una victoria
-
+  geom_jitter(width = 1.5) +
+  scale_color_brewer(palette = "Set1") +
+  labs(x = "Partidos Nadal Últimos 6 Meses",
+       y = "Win Rate Nadal Últimos 6 Meses") +
+  theme_few()
+#Miramos ahora la relación entre rankings y resultado del partido
 df_matches %>% 
   ggplot(aes(x = RankNadal, y = RankRival,
              color = Result)) + 
   geom_jitter() + 
   coord_cartesian(ylim = c(0, 20),
-                  xlim = c(0, 10)) #Hay mayores posibilidades de derrota si el rival forma parte del top 10
-
+                  xlim = c(0, 10)) +
+  scale_x_continuous(breaks = c(1,3,5,7,9)) +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Ranking Nadal",
+       y = "Ranking Rival") + 
+  theme_few()
+#Superficie y resultado
 df_matches %>% 
   ggplot(aes(x = Surface, fill = Result)) + 
-  geom_bar(position = "fill") #Clay es sin dudas las superficie de mayor performance
-
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Surface") + 
+  theme_few()
+#Longitud del partido
 df_matches %>% 
   ggplot(aes(x = BestOf, fill = Result)) + 
   geom_bar(position = "fill") + 
-  facet_grid(.~Surface) #A 5 sets parece rendir mejor Nadal
-
+  facet_grid(.~Surface) +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Best Of") + 
+  theme_few()
+#Ronda y superficie
 df_matches %>% 
   ggplot(aes(x = Round, fill = Result)) + 
   geom_bar(position = "fill") + 
   facet_grid(.~Surface) + 
-  theme(axis.text.x = element_text(angle = 45)) #En las primeras rondas el % de victorias en mayor
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Round",
+       y = "Porcentaje de victorias") + 
+  theme_few() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   size = 6,
+                                   vjust = 1,
+                                   hjust = 1))
 
-df_matches %>% 
-  ggplot(aes(x = PartidosUlt6Meses, y = PartidosUlt3Meses)) +
-  geom_jitter() #hay correlacion entre estas dos variables.
-
-df_matches %>% 
-  ggplot(aes(x = PartidosUlt6Meses, y = PartidosUltMes)) +
-  geom_jitter() #Entre estas no tanto
-
-df_matches %>% 
-  ggplot(aes(x = PartidosUlt3Meses, y = PartidosUltMes)) +
-  geom_jitter() #Entre estas algo, menos que para 3 y 6
 ```
 
 Obtenemos algunas conclusiones de estos gráficos:
@@ -142,74 +159,153 @@ Obtenemos algunas conclusiones de estos gráficos:
 
 Con esto, claramente, no descubrimos nada nuevo. La intención ahora es utilizar estas conclusiones para modelar la probabilidad de victoria en un partido de Nadal, y en base a ello poder predecir el resultado del partido.
 
+## Reducción de Dimensionalidad
+
+Antes de comenzar con el ajuste de los modelos, sería interesante poder ver a las observaciones en un gráfico tridimensional. Obviamente, al estar trabajando en un espacio muy grande (tenemos 24 covariables) no podemos graficarlas con toda la información disponibl, sino que tenemos que usar una técnica de reducción de dimensionalidad.
+
+La técnica a utilizar será **t-Distributed Stochastic Neighbor Embedding (T-SNE)**. Está metodología logra aproximar las observaciones que viven en un espacio muy grande en uno mucho más pequeño que permite graficarlas (2 o 3 dimensiones).
+Para más información sobre el tema recomiendo ver los videos que Andrés Farall tiene publicados acerca del mismo: https://www.youtube.com/playlist?list=PLN2e9R_DoC0TjZtHGm8-PFifxzE9KwilZ.
+
+T-SNE requiere del cálculo de distancias entre observaciones para hacer la reducción de dimensionalidad. Si las variables son continuas, generalmente se utiliza la distancia euclídea, pero si son categóricas tendremos que usar otra fórmula de cálculo. En nuestro caso, poseemos un mix de variables continuas y categóricas, con lo cual utilizaremos la distancia Gower.
+Este concepto de distancia consiste en aplicar una fórmula diferente según el tipo de variables que estemos midiendo y luego aplicarle una función para que el valor final caiga entre 0 y 1.
+
+```{r tsne, fig.height=5, fig.width=5, webgl=TRUE}
+#Calculo matriz de distancias
+gower_dist <- daisy(df_matches[,-c(3,25)],
+                    metric = "gower",
+                    type = list(logratio = 3))
+summary(gower_dist)
+
+
+gower_mat <- as.matrix(gower_dist)
+#Veo la más disimil
+df_matches[which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]),
+        arr.ind = TRUE)[1, ], ] #Vemos con son muy distintas
+
+#Calculo coordenadas con tsne
+tsne_obj <- Rtsne(gower_dist, is_distance = TRUE, dims = 3)
+#Default perplexity is 0.5
+
+tsne_data <- tsne_obj$Y %>% 
+  as_tibble %>% 
+  mutate(Result = df_matches %>% pull(Result)) %>% 
+  mutate(Result = recode(Result, "1" = "Win", "0" = "Lose"))
+
+#Colores
+color <- rep("green", nrow(df_matches))
+color[which(df_matches[,25]==0)] = "red"
+
+#Ploteo 3D
+plot3d(tsne_data[1:3], col = color)
+rglwidget()
+```
+
+En el gráfico tridimensional de arriba podemos ver la representación en baja dimensión que obtenemos mediante la aplicación de T-SNE. Las observaciones rojas representan los partidas perdidos por Nadal, mientras que las verdes representan los ganados. Se puede ver que hay zonas donde predominan los rojos, zonas que son las que vamos a intentar identificar mediante la aplicación de SVM.
+
+
 ## Tasas de Corte
 
-Vamos a utilizar un modelo logístico para predecir un resultado de un partido de tenis de Nadal. Ahora bien, cuando miremos los resultados de clasificación del modelo, ¿qué tasa de aciertos consideraremos como "buena"?
+Vamos a utilizar un modelo de clasificación para predecir un resultado de un partido de tenis de Nadal. Ahora bien, cuando miremos los resultados de clasificación del modelo, ¿qué tasa de aciertos consideraremos como "buena"?
 Nadal, de por sí, gana la gran mayoría de partidos en los que participa, con lo cual una buena estrategia para "predecir" el resultado del partido parece ser decir que siempre va a ganar Nadal, sin tener en cuenta ninguna variable adicional.
 
 Veamos cuál sería, estadísticamente, nuestra tasa de acierto si nos jugáramos siempre a que gana Nadal.
 
 ```{r tasas_corte}
 #Probabilidad histórica de victoria Nadal
-df_matches %>% 
+tasa_historica <- df_matches %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
-#Si digo que siempre gana, acierto el 83% de las veces.
-
-#Probabilidad ultimos 2 años
-df_matches %>% 
+tasa_historica
+#Probabilidad a partir de 2019
+tasa_2019 <- df_matches %>% 
   filter(Date > ymd("2019-01-01")) %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
+tasa_2019
 #Probabilidad 2020 en adelante
-df_matches %>% 
+tasa_2020 <- df_matches %>% 
   filter(Date > ymd("2020-01-01")) %>% 
   pull(Result) %>% 
   table() %>% 
   prop.table() 
-
-#Probabilidad post cuarentena
-df_matches %>% 
-  filter(Date > ymd("2020-08-01")) %>% 
-  pull(Result) %>% 
-  table() %>% 
-  prop.table() 
-
-#Probabilidad 2021
-df_matches %>% 
-  filter(Date > ymd("2020-12-31")) %>% 
-  pull(Result) %>% 
-  table() %>% 
-  prop.table() 
-
-# En definitiva, si yo digo que gana nadal siempre
-# voy a acertar un 80%. Necesito un modelo que supere claramente ese nro
-# O sea un modelo de + de 85% de acierto.
-
-#En clay 2019 en adelante
-df_matches %>% 
-  filter(Date > ymd("2018-12-31") & 
-           Surface == "Clay") %>% 
-  pull(Result) %>% 
-  table() %>% 
-  prop.table() 
-
+tasa_2020
 ```
 
-Las tasas históricas de victoria de Rafael Nadal son las siguientes (pueden variar al actualizar la data):
+Las tasas históricas de victoria de Rafael Nadal son las siguientes:
 
-- Histórica: 83.9%
-- Últimos dos años: 84.7%
-- 2020 en adelante: 83,6%
-- Post receso COVID-19: 82%
-- 2021: 85%
-- Clay a partir de 2019: 87.5%
+- Histórica: `r round(tasa_historica[2]*100,2)`%
+- A partir de 2019: `r round(tasa_2019[2]*100,2)`%
+- 2020 en adelante: `r round(tasa_2020[2]*100,2)`%
 
 En base a estos números, podemos decir que un modelo predictivo, para que sea realmente útil, debería tener una tasa de acierto esperada superior al 90%.
 Un modelo que acierta el resultado en menos del 85% de los partidos no representa ninguna mejora respecto a la "estrategia" de predicción consistente en decir que siempre gana Nadal.
 
 ## Model Train
+
+LLegamos hasta acá con una buena impresión de cómo lucen los datos. Ahora vamos a construir nuestro modelo predictivo aplicando Support Vector Machines.
+
+### Estrategia de Entrenamiento-Testeo
+
+Como estrategia de entrenamiento y testeo, entrenamos utilizando *m-repeated k-fold cross validation* para obtener una medida del error que no esté sesgada por los datos. Este entrenamiento se realizará solo con los partidos previos a abril 2020 (inicio de la pandemia COVID-19). Los partidos post receso por pandemia serán utilizados como base de testeo, donde se analizará de forma más precisa la performance predictiva del modelo.
+
+### Ajuste de modelos
+
+Comenzamos con el ajuste de modelos.
+
+```{r SVM}
+#defino el train_contol
+train_control <- trainControl(method = "repeatedcv",
+                             number = 10,
+                             repeats = 5)
+#Armo una grid para hacer un gridsearch de parámetros
+grid <- expand.grid(C = seq(4.9,5.1,0.1),
+                    sigma = seq(0.01,0.017,0.0005))
+
+#Separo data test y train
+data_train <- df_matches %>% 
+  filter(Date < "2020-04-01") %>% 
+  select(-Date)
+data_test <- df_matches %>% 
+  filter(Date >= "2020-04-01") %>% 
+  select(-Date)
+
+#Entreno con dataset train
+set.seed(1234)
+svm.fit <- train(Result ~.,
+                 data = data_train,
+                 method = "svmRadial",
+                 trControl = train_control,
+                 preProcess = c("center", "scale"),
+                 tuneGrid = grid,
+                 na.action = na.omit)
+
+#Chequeo el mejor C y el mejor sigma que maximizan accuracy
+svm.fit$bestTune
+
+#Veo el modelo
+svm.fit
+
+#Pruebo sobre base de testeo
+pred <- predict(svm.fit, newdata = data_test)
+confusionMatrix(pred,data_test$Result)
+
+```
+
+Como se puede ver, el mejor modelo que pudimos conseguir posee una accuracy de `r round(svm.fit$results[row.names(svm.fit$bestTune),3]*100,2)`%. Los parámetros con los que se logran estos resultados son:
+
+- C = `r svm.fit$results[row.names(svm.fit$bestTune),1]`
+- Sigma (Gamma) = `r svm.fit$results[row.names(svm.fit$bestTune),2]`
+
+Este resultado es prácticamente igual al que obtuvimos con Regresión Logística, donde el mejor modelo que pudimos entrenar tuvo una accuracy del 95%.
+
+Viendo la matriz de confusión con las predicciones sobre la base de testeo, estas no son tan buenas como los que obtuvimos utilizando Regresión Logística.
+Con este último método tenemos la ventaja de que rápidamente podemos calcular la probabilidad de victoria y ajustar el umbral de clasificación para obtener mejores resultados predictivos.
+
+# Conclusión
+
+Los resultados predictivos que surgen de la aplicación de SVM a nuestro problema sin dudas son buenos. El accuracy calculado utilizando cross-validation es sin dudas muy bueno.
+Sin embargo, viendo que los resultados obtenidos con Regresión Logística son muy parecidos, si tuvieramos que elegir entre ambos métodos podríamos tender a elegir el modelo de Regresión, ya que es una técnica mucho más fácil de comprender y con mayor capacidad explicativa.
+
+De todas formas, SVM no deja de ser un método super flexible y con gran potencial. Aquí hemos probado un solo tipo de kernel, con lo cual queda abierta la puerta para seguir investigando otras soluciones que puedan dar mejores resultados.
