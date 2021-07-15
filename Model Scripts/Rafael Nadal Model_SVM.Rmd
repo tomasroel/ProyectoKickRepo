@@ -40,7 +40,8 @@ Arrancamos con un setup del environment donde vamos a trabajar.
 ```{r setup, warning=FALSE, message=FALSE}
 #Cargo librerias de interes
 pacman::p_load(pacman, tidyverse, rio, magrittr, lubridate,
-               RColorBrewer, caret, e1071, readr, rgl, cluster, Rtsne, ggthemes)
+               RColorBrewer, caret, e1071, readr, rgl, cluster, Rtsne, ggthemes,
+               ROSE)
 options(scipen = 999) #Elimino notacion cientifica
 options(rgl.useNULL = TRUE) #Gráficos 3D interactivos
 ```
@@ -302,7 +303,83 @@ Como se puede ver, el mejor modelo que pudimos conseguir posee una accuracy de `
 Este resultado es prácticamente igual al que obtuvimos con Regresión Logística, donde el mejor modelo que pudimos entrenar tuvo una accuracy del 95%.
 
 Viendo la matriz de confusión con las predicciones sobre la base de testeo, estas no son tan buenas como los que obtuvimos utilizando Regresión Logística.
-Con este último método tenemos la ventaja de que rápidamente podemos calcular la probabilidad de victoria para cada observación en la base de testeo y ajustar el umbral de clasificación para obtener mejores resultados predictivos.
+Podmos observar que la sensibilidad del modelo sobre la base de testeo es muy baja, lo que quiere decir que tiene problemas para detectar los partidos en donde Nadal pierde.
+Utilizando Regresión Logística tenemos la ventaja de que rápidamente podemos calcular la probabilidad de victoria para cada observación en la base de testeo y ajustar el umbral de clasificación para obtener mejores resultados predictivos.
+
+### Balanceo del Dataset
+
+Esta mala performance de SVM para detectar los partidos en donde Nadal pierde puede deberse a que el dataset está sumamente desbalanceado. Con esto queremos decir que hay muchas más observaciones de una clase que de la otra (muchos más partidos ganados que perdidos). Veamos, sobre la base de entrenamiento, cómo están distribuidas las clases.
+
+```{r clases, fig.height=6, fig.width=12}
+data_train %>% 
+  select(Result) %>% 
+  table(Result = .) %>% 
+  prop.table() %>% 
+  round(2) %>% 
+  as_tibble() %>% 
+  rename(Prop = n) %>% 
+  ggplot(aes(x = Result, y = Prop, fill = Result)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_brewer(palette = "Set1") + 
+  geom_text(aes(label = Prop, vjust = -0.5)) + 
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(y = "Proporción") +
+  theme_few() +
+  theme(legend.position = "none")
+
+```
+Vemos que más del 80% de los partidos en la base train corresponden a partidos ganados. Esto termina perjudicando la performance del modelo, ya que al tener pocos partidos perdidos de los cuales aprender, le termina siendo difícil identificarlos.
+
+Afortunadamente tenemos una posible solución para esto. Vamos a volver a realizar el ajuste de SVM, pero esta vez realizaremos un balanceo previo del dataset utilizando una técnica conocida como *Random Oversampling*.
+Esta técnica consiste en emparejar la distribución de clases del dataset completando la base de entrenamiento con un muestreo con reposición de observaciones de la clase minoritaria.
+
+```{r oversampling_SVM, fig.height=6, fig.width=12, message=FALSE, warning=FALSE }
+#Generamos nueva base balanceada
+train_over <- ovun.sample(Result~.,
+                          data = data_train,
+                          method = "over",
+                         N = 1700)$data
+#Visualizamos la distribución de clases
+train_over %>% 
+  select(Result) %>% 
+  table(Result = .) %>% 
+  prop.table() %>% 
+  round(2) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = Result, y = n, fill = Result)) + 
+  geom_bar(stat = "identity") + 
+  geom_text(aes(label = n, vjust = -0.5)) +
+  coord_cartesian(ylim = c(0,1)) + 
+  scale_fill_brewer(palette = "Set1") +
+  theme_few()+
+  theme(legend.position = "none")
+
+#Definimos grid para el grid search
+grid2 <- expand.grid(C = seq(25,35,1),
+                    sigma = seq(0.015,0.018,0.001))
+
+#Entrenamiento con dataset train
+set.seed(1234)
+svm.fit2 <- train(Result ~.,
+                 data = train_over,
+                 method = "svmRadial",
+                 trControl = train_control,
+                 preProcess = c("center", "scale"),
+                 tuneGrid = grid2,
+                 na.action = na.omit)
+#Mejor C y el mejor sigma que maximizan accuracy
+svm.fit2$bestTune
+#Resumen del modelo
+svm.fit2
+#Prueba sobre base de testeo y matriz de confusión
+pred <- predict(svm.fit2, newdata = data_test)
+confusionMatrix(pred,data_test$Result)
+  
+```
+
+Vemos que con este nuevo ajuste logramos aumentar la sensibilidad sobre la base de testeo, es decir el porcentaje de partidos perdidos que el modelo clasifica correctamente.
+
+De todas formas, no pudimos lograr una performance tan buena sobre esta base como la que obtuvimos con Regresión Logística.
 
 # Conclusión
 
