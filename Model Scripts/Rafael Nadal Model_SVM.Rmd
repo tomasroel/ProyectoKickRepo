@@ -4,6 +4,9 @@ author: "Tomás Roel"
 date: "July 14, 2021"
 output:
   html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
     df_print: paged
   html_notebook:
     theme: paper

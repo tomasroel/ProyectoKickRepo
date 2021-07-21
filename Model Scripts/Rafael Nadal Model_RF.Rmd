@@ -1,0 +1,412 @@
+---
+title: "Random Forest - Aplicación en el Tenis"
+author: "Tomás Roel"
+date: "July 16, 2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    df_print: paged
+  html_notebook:
+    theme: paper
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+# Introducción
+
+Este documento es parte de una serie de trabajos acerca de clasificación en partidos de tenis. Podrán ver los primeros dos ejemplares clickeando en los siguientes links:
+
+- Regresión Logística: *https://rpubs.com/tomroel/regresion-logistica-rafael-nadal*
+- Support Vector Machine: *https://rpubs.com/tomroel/support-vector-machine-rafael-nadal*
+
+El objetivo de cada uno de estos trabajos mostrar, paso a paso, la aplicación de algoritmos de la ciencia de datos para intentar predecir el resultado de un partido de tenis de Rafael Nadal, partido que solo tiene dos resultados posibles: victoria o derrota.
+
+Repasando el problema, el mismo consiste en utilizar un set de variables acerca del contexto del partido y de la condición en que cada uno de los tenistas llega a disputar el encuentro para predecir quién será el ganador del mismo.
+
+## Conceptos Importantes
+
+En esta ocasión, probaremos un modelo conceptualmente distinto a Regresión Logística y Support Vector Machine. Trabajaremos con **Random Forest**, un algoritmo de los denominados "de ensamble", donde no ajustaremos un único predictor, sino que la idea es valerse de muchos predictores independientes para luego construir un predictor final mediante el "ensamble" de estos últimos.
+
+El método está basado en la aplicación de una heurística denominada *Bagging*. No describiremos aquí en detalle de qué se trata este concepto ya que no es el objetivo del trabajo, pero sí repasaremos cuáles son las ideas principales.
+
+### Bagging
+
+Teniendo presente el trade-off sesgo-varianza, sabemos que los predictores complejos son insesgados pero tienen una alta variabilidad, es decir son más propensos al overfitting.
+El objetivo de *Bagging* es utilizar un gran número de predictores **insesgados** (y por lo tanto complejos) e **independientes** para construir un predictor final que tenga menor variabilidad que los predictores complejos considerados individualmente. Es decir, ensambla muchos predictores insesgados para construir un predictor más potente, en términos de reducción de variabilidad.
+
+La clave del concepto de *Bagging* está en la insesgadez y en la independencia. El método necesita que cada uno de los predictores complejos falle en zonas distintas (independencia) del feature space, de forma tal que el predictor final, que será un promedio de todos los anteriores, logre acertar en esas zonas donde fallan los predictores individuales.
+Ahora bien, supongamos que queremos utilizar *M* predictores independientes, necesitamos entonces *M* muestras distintas, pero solo disponemos de una única muestra de nuestro fenómeno a estudiar (denominada *X* ). Para sortear este obstáculo, el método genera las *M* muestras requeridas utilizando la técnica Bootstrap, la cual consiste en muestrear con reposición a la muestra original. Estas *M* muestras generadas, si bien no son completamente independientes, son útiles para generar los *M* predictores insesgados que van a contar con cierto grado de independencia y que permiten ensamblar un predictor promedio final mucho más robusto que los predictores individuales.
+
+### Random Forest
+
+El algoritmo de Random Forest se puede definir rápidamente como una aplicación de la heurística Bagging a árboles de regresión y clasificación. Sin embargo, Random Forest incorpora una modificación que lo diferencia (y lo vuelve más potente) a la simple aplicación de Bagging a árboles.
+
+La modificación que RF incorpora es una restricción a la cantidad de variables que cada uno de los árboles va a tener a disposición en cada corte para armar las ramas. Supongamos que disponemos de *p* covariables en un problema de clasificación, donde *y* es la variable target. El algoritmo realiza los siguientes pasos:
+
+1. Genera muestra bootstrap sobre la muestra original (*X* ), del mismo tamaño.
+2. Ajusta un árbol de clasificación sobre esa muestra, teniendo en cuenta la siguiente restricción:
+    a. Para cada corte que haga el árbol, solo va a tener disponibles *d* (siendo *d* estrictamente menor a *p*) covariables, las cuales serán elegidas aleatoriamente.
+3. Vuelve al paso 1, repitiendo el mismo procedimiento *M* veces.
+
+Con esta restricción, RF incluye dos procesos de aleatorización distintos: uno sobre la muestra y otro sobre las covariables. Estos procesos aumentan el grado de independencia entre los *M* árboles que el método ajusta. Recordemos que la independencia de los predictores era una de las condiciones más importantes de Bagging, y, por cierto, la más difícil de generar.
+
+Además, RF nos va a facilitar una medida del error insesgada, calculada sobre las observaciones que quedan fuera en cada muestra bootstrap. Esto se denomina ***Out-of-Bag (OOB) Error***.
+Por último, RF también ofrece un método robusto para medir la importancia relativa de cada variable utilizada.
+
+# Desarrollo
+
+En las próximas secciones iremos desarrollando, paso a paso, la aplicación de Random Forest a nuestro problema de clasificación. Todo el trabajo ha sido realizado usando R como herramienta principal.
+
+## Setup
+
+Arrancamos con un setup del environment donde vamos a trabajar.
+
+```{r setup, warning=FALSE, message=FALSE}
+#Cargo librerias de interes
+pacman::p_load(pacman, tidyverse, magrittr, lubridate, RColorBrewer, caret, readr,
+               rgl, cluster, Rtsne, ggthemes, ROSE, randomForest)
+options(scipen = 999) #Elimino notacion cientifica
+options(rgl.useNULL = TRUE) #Gráficos 3D interactivos
+```
+
+Importamos la base de datos con la que trabajaremos.
+
+```{r data_import, warning=FALSE, message=FALSE}
+#importo base desde repositorio en github
+path <- "https://raw.githubusercontent.com/tomasroel/ProyectoKickRepo/main/Output/matches_nadal_ok.csv"
+matches_nadal_ok <- read_csv(url(path))[,-1]
+
+#separo las variables a utilizar
+variables <- c("Location", "Series", "Court", "Surface", "Date",
+               "Round", "BestOf", "RankNadal", "RankRival",
+               "PartidosUlt6Meses", "PartidosUlt3Meses", "PartidosUltMes",
+               "WRUlt6Meses", "WRUlt3Meses", "WRUltMes",
+               "PartidosRivalUlt6Meses", "PartidosRivalUlt3Meses",
+               "PartidosRivalUltMes", "WRRivalUlt6Meses", "WRRivalUlt3Meses",
+               "WRRivalUltMes", "SetsGanadosUltPartido", "SetsPerdidosUltPartido",
+               "ResultUltPartido", "RoundUltPartido", "H2HPartidos", "H2HGanados",
+               "Result")
+#Ajusto data types de variables
+df_matches <- matches_nadal_ok %>% 
+  select(all_of(variables)) %>% 
+  mutate_at(vars(Location, Series, Court, Surface,
+                 Round, BestOf, ResultUltPartido, RoundUltPartido, Result),
+            as.factor)
+rm(matches_nadal_ok, path, variables)
+glimpse(df_matches) #Vistazo a la base
+
+```
+
+Nuestra variable target será 'Resultado'. Esta variable puede tomar solo dos valores, "win" o "lose". El resto de las variables aportan información sobre el contexto en el cual se está jugando el partido (superficie, cantidad de sets a disputar, ronda, etc.) y también aportan información sobre la condición previa en que llega cada jugador al partido (ranking, cantidad de partidos jugados, porcentaje de partidos ganados, resultado del último partido, etc.)
+
+## Data Wrangling
+
+Con la base ya cargada, hacemos unos ajustes necesarios previos al análisis.
+Random Forest necesita como input una matriz numérica, con lo cual debemos transformar todas las variables categóricas haciendo un *one hot encoding*. Al trabajar con la librería `randomForest` no es necesario que hagamos manualmente estas modificaciones ya que las funciones que utilizaremos las harán por nosotros.
+
+
+```{r data_wrangling}
+#Elimino variables que no son de interes
+df_matches <- df_matches[,-c(1,2)]
+#Elimino observaciones que no me sirven porque no tengo registro de los partidos anteriores
+df_matches %>%
+  select(RankNadal,PartidosUlt6Meses, PartidosUlt3Meses, PartidosUltMes) %>% 
+ print(n = 70)
+#Elimino primeras 50 observaciones, a partir de ahi se nivela
+df_matches <- df_matches[51:nrow(df_matches),]
+```
+
+## Plots
+
+Vamos a echar un vistazo a los datos con los que vamos a trabajar mirando unos plots rápidos. La idea es ver cómo varía el porcentaje de victorias de Rafel Nadal en el circuito cuando segmentamos los partidos por alguna de las variables que tenemos disponibles.
+
+```{r plots, fig.height=6, fig.width=10, fig.align='center'}
+#Resultado según el rendimiento que tuvo en los últimos 6 meses.
+df_matches %>% 
+  ggplot(aes(x = PartidosUlt6Meses, y = WRUlt6Meses,
+             color = Result)) + 
+  geom_jitter(width = 1.5) +
+  scale_color_brewer(palette = "Set1") +
+  labs(x = "Partidos Nadal Últimos 6 Meses",
+       y = "Win Rate Nadal Últimos 6 Meses") +
+  theme_few()
+#Relación entre rankings y resultado del partido
+df_matches %>% 
+  ggplot(aes(x = RankNadal, y = RankRival,
+             color = Result)) + 
+  geom_jitter() + 
+  coord_cartesian(ylim = c(0, 20),
+                  xlim = c(0, 10)) +
+  scale_x_continuous(breaks = c(1,3,5,7,9)) +
+  scale_color_brewer(palette = "Set1") + 
+  labs(x = "Ranking Nadal",
+       y = "Ranking Rival") + 
+  theme_few()
+#Superficie y resultado
+df_matches %>% 
+  ggplot(aes(x = Surface, fill = Result)) + 
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Surface") + 
+  theme_few()
+#Longitud del partido
+df_matches %>% 
+  ggplot(aes(x = BestOf, fill = Result)) + 
+  geom_bar(position = "fill") + 
+  facet_grid(.~Surface) +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Best Of") + 
+  theme_few()
+#Ronda y superficie
+df_matches %>% 
+  ggplot(aes(x = Round, fill = Result)) + 
+  geom_bar(position = "fill") + 
+  facet_grid(.~Surface) + 
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Round",
+       y = "Porcentaje de victorias") + 
+  theme_few() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   size = 6,
+                                   vjust = 1,
+                                   hjust = 1))
+
+```
+
+Obtenemos algunas conclusiones de estos gráficos:
+
+- Cuando Nadal llega con ritmo (cantidad de partidos) y con buen porcentaje de victorias (WR) parece ser más probable que obtenga una victoria en el partido.
+- Si el rival forma parte del top 10, las chances de derrota son mayores.
+- El clay (polvo de ladrillo) es sin dudas la superficie que mejor le sienta.
+- A 5 sets parece haber una mejor performance en general de Nadal.
+- En las primeras rondas del torneo tiende a tener un porcentaje de victorias mayor.
+
+Con esto, claramente, no descubrimos nada nuevo. La intención ahora es utilizar estas conclusiones para modelar la probabilidad de victoria en un partido de Nadal, y en base a ello poder predecir el resultado del partido.
+
+## Reducción de Dimensionalidad
+
+Antes de comenzar con el ajuste de los modelos, sería interesante poder ver a las observaciones en un gráfico tridimensional. Obviamente, al estar trabajando en un espacio muy grande (tenemos 24 covariables) no podemos graficarlas usando toda la información disponible, sino que tenemos que usar una técnica de reducción de dimensionalidad.
+
+La técnica a utilizar será **t-Distributed Stochastic Neighbor Embedding (T-SNE)**. Esta metodología logra aproximar las observaciones que viven en un espacio muy grande en uno mucho más pequeño que permite graficarlas (2 o 3 dimensiones).
+Para más información sobre el tema recomiendo ver los videos que Andrés Farall tiene publicados acerca del mismo: https://www.youtube.com/playlist?list=PLN2e9R_DoC0TjZtHGm8-PFifxzE9KwilZ.
+
+T-SNE requiere del cálculo de distancias entre observaciones para hacer la reducción de dimensionalidad. Si las variables son continuas, generalmente se utiliza la distancia euclídea, pero si son categóricas tendremos que usar otra fórmula de cálculo. En nuestro caso, poseemos un mix de variables continuas y categóricas, con lo cual utilizaremos la distancia Gower.
+Este concepto de distancia consiste en aplicar una fórmula diferente según el tipo de variables que estemos midiendo y luego aplicarle una función para que el valor final caiga entre 0 y 1.
+
+```{r tsne, fig.height=5, fig.width=5, webgl=TRUE, warning=FALSE, fig.align='center', message=FALSE}
+#Matriz de distancias
+gower_dist <- daisy(df_matches[,-c(3,25)],
+                    metric = "gower",
+                    type = list(logratio = 3))
+summary(gower_dist)
+
+gower_mat <- as.matrix(gower_dist)
+#Observaciones más disímiles
+df_matches[which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]),
+        arr.ind = TRUE)[1, ], ] #Vemos con son muy distintas
+
+#Reducción de dimensión con tsne
+tsne_obj <- Rtsne(gower_dist, is_distance = TRUE, dims = 3)
+#Default perplexity is 0.5
+
+tsne_data <- tsne_obj$Y %>% 
+  as_tibble %>% 
+  mutate(Result = df_matches %>% pull(Result)) %>% 
+  mutate(Result = recode(Result, "1" = "Win", "0" = "Lose"))
+
+#Colores
+color <- rep("green", nrow(df_matches))
+color[which(df_matches[,25]==0)] = "red"
+
+#Ploteo 3D
+plot3d(tsne_data[1:3], col = color)
+rglwidget()
+```
+
+En el gráfico tridimensional podemos ver la representación en baja dimensión que obtenemos mediante la aplicación de T-SNE. Las observaciones rojas representan los partidos perdidos por Nadal, mientras que las verdes representan los ganados. Se puede ver que hay zonas con mayor cantidad de rojos, zonas que vamos a intentar identificar mediante la aplicación de Random Forest.
+
+
+## Tasas de Corte
+
+Vamos a utilizar un modelo de clasificación para predecir un resultado de un partido de tenis de Nadal. Ahora bien, cuando miremos los resultados de clasificación del modelo, ¿qué tasa de aciertos consideraremos como "buena"?
+Nadal, de por sí, gana la gran mayoría de partidos en los que participa, con lo cual una buena estrategia para "predecir" el resultado del partido parece ser decir que siempre va a ganar Nadal, sin tener en cuenta ninguna variable adicional.
+
+Veamos cuál sería, estadísticamente, nuestra tasa de acierto si nos jugáramos siempre a que gana Nadal.
+
+```{r tasas_corte}
+#Probabilidad histórica de victoria Nadal
+tasa_historica <- df_matches %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+tasa_historica
+#Probabilidad a partir de 2019
+tasa_2019 <- df_matches %>% 
+  filter(Date > ymd("2019-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+tasa_2019
+#Probabilidad 2020 en adelante
+tasa_2020 <- df_matches %>% 
+  filter(Date > ymd("2020-01-01")) %>% 
+  pull(Result) %>% 
+  table() %>% 
+  prop.table() 
+tasa_2020
+```
+
+Las tasas históricas de victoria de Rafael Nadal son las siguientes:
+
+- Histórica: `r round(tasa_historica[2]*100,2)`%
+- A partir de 2019: `r round(tasa_2019[2]*100,2)`%
+- 2020 en adelante: `r round(tasa_2020[2]*100,2)`%
+
+En base a estos números, podemos decir que un modelo predictivo, para que sea realmente útil, debería tener una tasa de acierto esperada superior al 90%.
+Un modelo que acierta el resultado en menos del 85% de los partidos no representa ninguna mejora respecto a la "estrategia" de predicción consistente en decir que siempre gana Nadal.
+
+## Model Train
+
+Llegamos hasta acá con una buena impresión de cómo lucen los datos. Ahora vamos a construir nuestro modelo predictivo aplicando Random Forest.
+
+### Estrategia de Entrenamiento-Testeo
+
+Como estrategia de entrenamiento-testeo, entrenaremos el modelo solo con los partidos previos a abril 2020 (inicio de la pandemia COVID-19). Los partidos post receso por pandemia serán utilizados como base de testeo, donde se analizará de forma más precisa la performance predictiva del modelo.
+
+Realizaremos varios ajustes sobre la base de entrenamiento y testearemos cada uno sobre la base test, utilizando un grid search para encontrar la combinación de parámetros que nos den los mejores resultados. El modelo final seleccionado será el que combine un bajo out-of-bag error con una alta sensibilidad sobre la base de testeo. Lo que nos importa, sobre todo, es tener un modelo con buena capacidad de detectar los partidos donde Nadal pierde, partidos que son escasos.
+
+### Ajuste de modelos
+
+Los parámetros óptimos que debemos encontrar para el modelo son 2:
+
+- ***mtry*** : es el *d*, la cantidad de variables disponibles en cada corte del árbol.
+- ***minimum_score***: es la proporción mínima de "Wins" que necesita una observación para ser clasificada como tal. Ejemplo: si ajustamos 1001 árboles y el *minimum_score* es 0.5, una observación necesita para ser clasificada como "Win" que al menos 51 árboles la clasifiquen como tal.
+
+Nuestra clase "positiva" será "Lose", con lo cual la sensibilidad del modelo se calculará sobre esta y la especificidad sobre la clase "Win".
+
+```{r random_forest, warning=FALSE, message=FALSE}
+#Base de train y test
+data_train <- df_matches %>% 
+  filter(Date < "2020-04-01") %>% 
+  select(-Date)
+data_test <- df_matches %>% 
+  filter(Date >= "2020-04-01") %>% 
+  select(-Date)
+
+#Grid search
+grid <- expand.grid(mtry = c(4,5,6),
+                    minimum_score = seq(0.55,0.9,0.05))
+
+#Agrego columnas para almacenar resultados
+grid %<>%
+  mutate(OOBerror = rep(0,nrow(grid)),
+         accuracy_test = rep(0,nrow(grid)),
+         sensitivity_test = rep(0,nrow(grid)),
+         specificity_test = rep(0,nrow(grid)))
+
+#Ajuste de modelos
+
+for (i in 1:nrow(grid)) {
+  
+  set.seed(1234)
+  
+  m = grid[i,1]
+  minimum_score = grid[i,2]
+  
+  rf.fit <- randomForest(Result~.,
+             data = data_train,
+             ntree = 1000, 
+             mtry = m,
+             cutoff = c(1-minimum_score, minimum_score),
+             na.action = na.omit)
+  
+  pred <- predict(rf.fit, newdata = data_test)
+  cf <- confusionMatrix(pred, data_test$Result)
+  
+  grid[i,3] = rf.fit$err.rate[1000,1]
+  grid[i,4] = cf$overall[1]
+  grid[i,5] = cf$byClass[1]
+  grid[i,6] = cf$byClass[2]
+
+  rm(rf.fit, m, minimum_score)  
+}
+
+#Modelos ordenados por métricas
+grid
+
+
+```
+De todos los modelos ajustados, nos interesa aquel que tenga un bajo error OOB y además tenga una alta sensibilidad y especificidad sobre la base de testeo. Observando la tabla de resultados final, el modelo ubicado en el cuarto lugar parece ser la mejor opción. Los parámetros que definen a este modelo son:
+
+- *mtry:* 5
+- *minimum_score:* 0.65
+
+# Resultados Finales
+
+Ya con el modelo final seleccionado, vamos a analizarlo más en detalle. Arrancamos viendo un resumen del mismo.
+
+```{r summary_selected}
+#Ajustamos el modelo final
+set.seed(1234)
+rf.selected <- randomForest(Result~.,
+                            data = data_train,
+                            ntree = 1000, 
+                            mtry = 5,
+                            cutoff = c(1-0.65, 0.65),
+                            na.action = na.omit)
+#Resumen del ajuste
+rf.selected  
+
+```
+El error OOB es de `r round(rf.selected$err.rate[1000,1],3)*100`%, lo cual nos señala que el modelo tiene una accuracy de casi 94%. A pesar de las modificaciones introducidas para lidiar con el desbalanceo de clases, al modelo le cuesta detectar los partidos en donde Nadal pierde. Esto lo podemos ver en el class.error de la clase "Lose".
+
+Veamos ahora los resultados sobre la base de testeo.
+
+```{r seleted_test}
+#Predicciones sobre base test
+pred <- predict(rf.selected, newdata = data_test)
+#Matriz de confusión
+confusionMatrix(pred, data_test$Result)
+```
+
+Podemos ver, sobre la base de testeo, la confirmación de lo que señalamos previamente. Al modelo le cuesta mucho más detectar de forma eficiente los partidos perdidos que los ganados, y esto se refleja en una sensibilidad menor respecto a la especificidad.
+De todas maneras, la performance sobre la base de testeo es muy buena. Considerando que nos interesa detectar de forma correcta los partidos donde Nadal pierde, este modelo hace un muy buen trabajo, prediciendo correctamente 7 de los 8 partidos donde Nadal pierde y arrojando solo dos falsos negativos.
+
+## Importancia Relativa de las Covariables
+
+Random Forest nos permite ver la importancia relativa de cada una de las variables, basado en cuánto contribuyen a mejorar la performance de cada árbol (reducir impureza de los nodos). Veamos cómo es el caso en nuestro problema.
+
+```{r variable_importance, fig.height=6, fig.width=10, fig.align='center'}
+#Importancia de variables
+var.importance <- rf.selected$importance %>% 
+  as_tibble(rownames = NA) %>% 
+  rownames_to_column(var = "Variable")
+
+#Ploteo de importancia
+var.importance %>% 
+  ggplot(aes(x = reorder(Variable, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = brewer.pal(4,"Set1")[4]) +
+  labs(x = "Variable",
+         y = "Mean Decrease Gini") +
+  theme_few() +
+  coord_flip()
+
+```
+
+Podemos observar que las variables más importantes son las relativas al win rate de cada uno de los jugadores. Estas variables nos marcan cómo llega cada uno de los tenistas al encuentro, en el sentido de si llega con una recha importante de victorias o si llega perdiendo la mayoría de los partidos en los que compite. Otras variables importantes son la ronda del torneo a la cual pertenece el partido y el ranking del rival.
+
+Estos resultados coinciden con el análisis que surge de los resultados de modelo de Regresión Logística.
+
+# Conclusión
+
+En resumen, el modelo ajustado tiene una muy buena capacidad predictiva. Ajustando el `minimum_score` pudimos lidiar correctamente con el problema de balanceo de clases y los resultados obtenidos concuerdan con los obtuvimos en el análisis por Regresión Logística.
+
+Aun así, existe todavía un gran margen de mejora. La conclusión más importante que obtuvimos es que las variables más relevantes para predecir el resultado del partido son las que nos marcan cómo llegan los tenistas al encuentro, en términos de performance en partidos previos. Si logramos enriquecer aún más nuestra base de datos, podemos sin dudas mejorar la capacidad predictiva del modelo.
+
+Los modelos de tipo Boosting también son otra opción que puede arrojar muy buenos resultados.
+
